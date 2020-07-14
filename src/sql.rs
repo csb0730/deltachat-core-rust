@@ -13,6 +13,7 @@ use crate::context::Context;
 use crate::dc_tools::*;
 use crate::param::*;
 use crate::peerstate::*;
+use crate::rusqlite::types::ValueRef; //cs
 
 #[derive(Debug, Fail)]
 pub enum Error {
@@ -95,6 +96,18 @@ impl Sql {
     // return true on success, false on failure
     pub fn open(&self, context: &Context, dbfile: &std::path::Path, readonly: bool) -> bool {
         match open(context, self, dbfile, readonly) {
+            Ok(_) => true,
+            Err(crate::error::Error::SqlError(Error::SqlAlreadyOpen)) => false,
+            Err(_) => {
+                self.close(context);
+                false
+            }
+        }
+    }
+
+    // cs: return true on success, false on failure
+    pub fn open_backup_db(&self, context: &Context, dbfile: &std::path::Path, readonly: bool) -> bool {
+        match open_backup_db(context, self, dbfile, readonly) {
             Ok(_) => true,
             Err(crate::error::Error::SqlError(Error::SqlAlreadyOpen)) => false,
             Err(_) => {
@@ -932,6 +945,119 @@ fn open(
     Ok(())
 }
 
+fn open_backup_db(
+    context: &Context,
+    sql: &Sql,
+    dbfile: impl AsRef<std::path::Path>,
+    readonly: bool,
+) -> crate::error::Result<()> {
+    if sql.is_open() {
+        error!(
+            context,
+            "Cannot open, database \"{:?}\" already opened.",
+            dbfile.as_ref(),
+        );
+        return Err(Error::SqlAlreadyOpen.into());
+    }
+
+    let mut open_flags = OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    if readonly {
+        open_flags.insert(OpenFlags::SQLITE_OPEN_READ_ONLY);
+    } else {
+        open_flags.insert(OpenFlags::SQLITE_OPEN_READ_WRITE);
+        open_flags.insert(OpenFlags::SQLITE_OPEN_CREATE);
+    }
+    let mgr = r2d2_sqlite::SqliteConnectionManager::file(dbfile.as_ref())
+        .with_flags(open_flags)
+        .with_init(|c| c.execute_batch("PRAGMA secure_delete=on;"));
+    let pool = r2d2::Pool::builder()
+        .min_idle(Some(2))
+        .max_size(10)
+        .connection_timeout(std::time::Duration::new(60, 0))
+        .build(mgr)
+        .map_err(Error::ConnectionPool)?;
+
+    {
+        *sql.pool.write().unwrap() = Some(pool);
+    }
+
+    if !readonly {
+
+        /* Init tables */
+        if !sql.table_exists("config") {
+            info!(
+                context,
+                "Creating backup db: creating tables in {:?}.",
+                dbfile.as_ref(),
+            );
+            sql.execute(
+                "CREATE TABLE config (id INTEGER PRIMARY KEY, keyname TEXT, value TEXT);",
+                NO_PARAMS,
+            )?;
+            sql.execute("CREATE INDEX config_index1 ON config (keyname);", NO_PARAMS)?;
+
+            /*
+             * 	https://www.sqlite.org/sqlar.html
+             *
+                Introduction
+
+                An "SQLite Archive" is a file container similar to a ZIP archive
+                or Tarball but based on an SQLite database.
+
+                An SQLite Archive is an ordinary SQLite database file that contains
+                the following table as part of its schema:
+
+                CREATE TABLE sqlar(
+                  name TEXT PRIMARY KEY,  -- name of the file
+                  mode INT,               -- access permissions
+                  mtime INT,              -- last modification time
+                  sz INT,                 -- original file size
+                  data BLOB               -- compressed content
+                );
+
+                Each row of the SQLAR table holds the content of a single file.
+                 The filename (the full pathname relative to the root of the archive) is in the "name" field.
+                  The "mode" field is an integer which is the unix-style access permissions for the file.
+                  "mtime" is the modification time of the file in seconds since 1970.
+                  "sz" is the original uncompressed size of the file.
+                  The "data" field contains the file content.
+                   The content is usually compressed using Deflate, though not always.
+                   If the "sz" field is equal to the size of the "data" field, then the content is stored uncompressed.
+             */
+
+            // sqlar table
+            sql.execute(
+                "CREATE TABLE sqlar (\
+                 name TEXT PRIMARY KEY, \
+                 mode INT, \
+                 mtime INT, \
+                 sz INT, \
+                 data BLOB);",
+                params![],
+            )?;
+
+
+            if !sql.table_exists("config")
+                || !sql.table_exists("sqlar") {
+                error!(
+                    context,
+                    "Cannot create tables in new database \"{:?}\".",
+                    dbfile.as_ref(),
+                );
+                // cannot create the tables - maybe we cannot write?
+                return Err(Error::SqlFailedToOpen.into());
+            } else {
+                sql.set_raw_config_int(context, "backup_file_version", 0)?;
+            }
+        }
+    }
+
+    info!(context, "Opened backup file {:?}.", dbfile.as_ref(),);
+
+    Ok(())
+}
+
+
 pub fn execute<P>(context: &Context, sql: &Sql, querystr: impl AsRef<str>, params: P) -> Result<()>
 where
     P: IntoIterator,
@@ -1201,7 +1327,24 @@ fn maybe_add_from_param(
         .query_map(
             query,
             NO_PARAMS,
-            |row| row.get::<_, String>(0),
+            //|row| row.get::<_, String>(0), // <=== todo - this crashes when non utf8 byte in column
+
+            // cs: maybe the following could be done more simple?
+            |row| {
+                let value = match row.get_raw(0) {
+                    ValueRef::Text(t) => {
+                        let col_str = String::from_utf8_lossy(t).to_string();
+                        //info!(context, "maybe_add_from_param() - col_str: \"{}\"", col_str);
+                        col_str
+                    },
+                    _ => {
+                        let s_err = "maybe_add_from_param() - error - get_raw(0)".to_string();
+                        info!(context, "{}", s_err);
+                        s_err
+                    },
+                };
+                Ok(value)
+            },
             |rows| {
                 for row in rows {
                     let param: Params = row?.parse().unwrap_or_default();

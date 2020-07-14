@@ -25,3 +25,7 @@ deltachat-ffi/html
 deltachat-ffi/xml
 
 .rsynclist
+
+# own files
+*.bak
+clean.sh

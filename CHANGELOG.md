@@ -1,5 +1,14 @@
 # Changelog 
 
+## 1.27.1 (cs)
+
+- backup2
+
+- add MIME 1.0 header
+
+- xxx
+
+
 ## 1.27.0
 
 - handle keys reliably on armv7 #1327
