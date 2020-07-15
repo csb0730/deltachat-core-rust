@@ -2,6 +2,7 @@
 
 use core::cmp::{max, min};
 use std::path::Path;
+use std::fs; // files metadata
 
 use num_traits::FromPrimitive;
 use rand::{thread_rng, Rng};
@@ -24,6 +25,7 @@ use crate::param::*;
 use crate::pgp;
 use crate::sql::{self, Sql};
 use crate::stock::StockMessage;
+use crate::rusqlite::types::ValueRef; //cs
 
 #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 #[repr(i32)]
@@ -383,8 +385,8 @@ pub fn JobImexImap(context: &Context, job: &Job) -> Result<()> {
     let success = match what {
         Some(ImexMode::ExportSelfKeys) => export_self_keys(context, path),
         Some(ImexMode::ImportSelfKeys) => import_self_keys(context, path),
-        Some(ImexMode::ExportBackup) => export_backup(context, path),
-        Some(ImexMode::ImportBackup) => import_backup(context, path),
+        Some(ImexMode::ExportBackup) => export_backup2(context, path), //cs
+        Some(ImexMode::ImportBackup) => import_backup2(context, path), //cs
         None => {
             bail!("unknown IMEX type");
         }
@@ -407,7 +409,7 @@ pub fn JobImexImap(context: &Context, job: &Job) -> Result<()> {
 fn import_backup(context: &Context, backup_to_import: impl AsRef<Path>) -> Result<()> {
     info!(
         context,
-        "Import \"{}\" to \"{}\".",
+        "Import \"backup_blobs\" format file\"{}\" to \"{}\".",
         backup_to_import.as_ref().display(),
         context.get_dbfile().display()
     );
@@ -494,11 +496,189 @@ fn import_backup(context: &Context, backup_to_import: impl AsRef<Path>) -> Resul
     }
 }
 
+
+/// Import Backup
+fn import_backup2(context: &Context, backup_to_import: impl AsRef<Path>) -> Result<()> {
+
+    // cs: always do import but close db when doing
+    ensure!(
+        !context.is_configured(),
+        "Cannot import backups to accounts in use."
+    );
+
+    ensure!(
+        backup_to_import.as_ref().exists(),
+        "backup database file {} not existing!",
+        backup_to_import.as_ref().display()
+    );
+
+
+	// open backup file and check the format
+    let bak_sql = Sql::new();
+    ensure!(
+        bak_sql.open_backup_db(context, backup_to_import.as_ref(), true),
+        "could not open backup database file{}",
+        backup_to_import.as_ref().display()
+    );
+
+	// check backup format
+	if bak_sql.table_exists("backup_blobs") {
+		// "backup_blobs" format detected
+		bak_sql.close(context);
+		// using original DC's function
+		return import_backup(context, backup_to_import);
+    };
+
+	// *** go on with "sqlar" format ***
+    info!(
+        context,
+        "Import \"sqlar\" backup file \"{}\" to \"{}\".",
+        backup_to_import.as_ref().display(),
+        context.get_dbfile().display()
+    );
+
+	ensure!(
+		bak_sql.table_exists("sqlar"),
+		"Table \"sqlar\" does not exist - stopping import, file doesn't exist?"
+	);
+
+    context.sql.close(&context);
+    dc_delete_file(context, context.get_dbfile());
+    ensure!(
+        !context.get_dbfile().exists(),
+        "Cannot delete old database."
+    );
+
+    let total_files_cnt = bak_sql
+        .query_get_value::<_, isize>(context, "SELECT COUNT(*) FROM sqlar;", params![])
+        .unwrap_or_default() as usize;
+    info!(
+        context,
+        "*** IMPORT-in-progress: total_files_cnt={:?} ***", total_files_cnt,
+    );
+
+	// extract all files. messenger.db is one of them (but with different path)
+    let res = bak_sql.query_map(
+        "SELECT name, data FROM sqlar;",
+        params![],
+        |row| {
+            // Statement  'let name: String = row.get(0)?;'  is an assumption!
+            //
+            // This assumption that data matches String type is only true with clean utf8!
+            // This simple "row.get(0) only works when TEXT column is ok and String conversion
+            // from clean utf8 encoding is possible.
+            // Every bad utf8 encoded data in TEXT column crashes this assumption and
+            // switches to Err(_) path.
+            let name: String = match row.get(0) {
+                Ok(name) => name, // good utf8 filename
+                Err(_) => { // bad utf8 encoding in filename
+                    let raw = match row.get_raw(0) {
+                        ValueRef::Null => "Null Value".to_string(),
+                        ValueRef::Text(t) => { // column type in db is TEXT
+                            let name = String::from_utf8_lossy(t).to_string();
+                            info!(context, "Err (_), ValueRef::Text(t), name: \"{}\"", name);
+                            name
+                            },
+                        ValueRef::Blob(b) => {
+                            let name = String::from_utf8_lossy(b).to_string();
+                            info!(context, "Err (_), ValueRef::Blob(b), name: \"{}\"", name);
+                            name
+                            },
+                        _ => "Other error determining type value".to_string(),
+                    };
+                    raw
+                },
+            };
+            
+            // this always works
+            let blob: Vec<u8> = row.get(1)?;
+
+            info!(context, "query_map |row| filename=\"{}\"", name);
+            
+            Ok((name, blob))
+        },
+        |files|{
+            info!(context, "query_map |files| files.enumerate() - writing files");
+
+            for (processed_files_cnt, file) in files.enumerate() {
+                let (path_n_filename, file_blob) = file?;
+
+                if context.shall_stop_ongoing() {
+                    return Ok(false);
+                }
+                if file_blob.is_empty() {
+                    continue;
+                }
+
+                let pnfn: Vec<&str> = path_n_filename.rsplitn(2,"/").collect();
+                let path     = pnfn[1];
+                let filename = pnfn[0]; // filename is first item (right to left!)
+
+                let path_n_blob_filename = context.get_blobdir().join(filename);
+
+                info!(context, "from backup file => path=\"{}\" filename=\"{}\"", path, filename);
+
+                // later this could be simplyfied:  if path_n_filename == "DB/messenger.db"
+                // but due to compatibility it isn't now
+                //
+                if /*path == "DB" &&*/ !path.contains("blobs") && filename.contains("messenger.db") {
+                    // messenger.db
+                    info!(context, "writing messenger.db: \"{}\"", context.get_dbfile().display());
+                    dc_write_file(context, context.get_dbfile(), &file_blob)?;
+                }
+                else {
+                    // blob file
+                    info!(context, "writing path_n_blob_filename: \"{}\"", path_n_blob_filename.to_string_lossy().to_string());
+                    dc_write_file(context, &path_n_blob_filename, &file_blob)?;
+                } 
+
+                let mut permille = processed_files_cnt * 1000 / total_files_cnt;
+                if permille < 10 {
+                    permille = 10
+                }
+                if permille > 990 {
+                    permille = 990
+                }
+                context.call_cb(Event::ImexProgress(permille));
+            }
+            Ok(true)
+        }
+    );
+    info!(context, "*********** query_map 'sqlar' done, all files written :-) ********************");
+        
+    bak_sql.close(context);
+    info!(context, "backup file closed");
+
+    match res {
+        Ok(all_files_extracted) => {
+            if all_files_extracted {
+                info!(context, "all files extracted from backup file");
+                info!(context, "opening imported db file...");
+                ensure!(
+                    context.sql.open(&context, &context.get_dbfile(), false),
+                    "could not re-open db"
+                );
+                info!(context, "deleting device msgs...");
+                delete_and_reset_all_device_msgs(&context)?;
+                info!(context, "*********** full import completed *************");
+                Ok(())
+            } else {
+                bail!("received stop signal");
+            }
+        },
+        Err(err) => Err(err.into()),
+    }
+
+}
+
+
+
 /*******************************************************************************
  * Export backup
  ******************************************************************************/
 /* the FILE_PROGRESS macro calls the callback with the permille of files processed.
 The macro avoids weird values of 0% or 100% while still working. */
+#[allow(dead_code)]
 fn export_backup(context: &Context, dir: impl AsRef<Path>) -> Result<()> {
     // get a fine backup file name (the name includes the date so that multiple backup instances are possible)
     // FIXME: we should write to a temporary file first and rename it on success. this would guarantee the backup is complete.
@@ -552,6 +732,49 @@ fn export_backup(context: &Context, dir: impl AsRef<Path>) -> Result<()> {
     Ok(res?)
 }
 
+/*
+ * cs: New backup routine which consumes less memory
+ */
+fn export_backup2(context: &Context, dir: impl AsRef<Path>) -> Result<()> {
+    // get a fine backup file name (the name includes the date so that multiple backup instances are possible)
+    // FIXME: we should write to a temporary file first and rename it on success. this would guarantee the backup is complete.
+    // let dest_path_filename = dc_get_next_backup_file(context, dir, res);
+    let now1 = time();
+    let dest_path_filename = dc_get_next_backup_path(dir, now1)?;
+    let dest_path_string = dest_path_filename.to_string_lossy().to_string();
+
+    sql::housekeeping(context);
+
+    sql::try_execute(context, &context.sql, "VACUUM;").ok();
+
+    let dest_sql = Sql::new();
+    ensure!(
+        dest_sql.open_backup_db(context, &dest_path_filename, false),
+        "could not open exported database {}",
+        dest_path_string
+    );
+    
+    let res = match add_files_to_export2(context, &dest_sql) {
+        Err(err) => {
+            dc_delete_file(context, &dest_path_filename);
+            error!(context, "backup failed: {}", err);
+            Err(err)
+        }
+        Ok(()) => {
+			let now2 = time();
+            dest_sql.set_raw_config_int(context, "backup_time", now1 as i32)?;
+            dest_sql.set_raw_config_int(context, "backup_duration", (now2-now1) as i32)?;
+            context.call_cb(Event::ImexFileWritten(dest_path_filename));
+            Ok(())
+        }
+    };
+
+    dest_sql.close(context);
+
+    Ok(res?)
+}
+
+#[allow(dead_code)]
 fn add_files_to_export(context: &Context, sql: &Sql) -> Result<()> {
     // add all files as blobs to the database copy (this does not require
     // the source to be locked, neigher the destination as it is used only here)
@@ -573,7 +796,7 @@ fn add_files_to_export(context: &Context, sql: &Sql) -> Result<()> {
     // scan directory, pass 2: copy files
     let dir_handle = std::fs::read_dir(&dir)?;
     let exported_all_files = sql.prepare(
-        "INSERT INTO backup_blobs (file_name, file_content) VALUES (?, ?);",
+        "INSERT INTO sqlar (file_name, file_content) VALUES (?, ?);",
         |mut stmt, _| {
             let mut processed_files_cnt = 0;
             for entry in dir_handle {
@@ -603,6 +826,138 @@ fn add_files_to_export(context: &Context, sql: &Sql) -> Result<()> {
             Ok(true)
         },
     )?;
+    ensure!(exported_all_files, "canceled during export-files");
+    Ok(())
+}
+
+
+fn get_file_mtime(src_path: impl AsRef<std::path::Path>) -> u32 {
+
+    use std::time::UNIX_EPOCH;
+    let mut mtime: u32 = 0;
+    
+    match fs::metadata(src_path){
+        Ok(metadata) => {
+            let mt = metadata.modified().unwrap().duration_since(UNIX_EPOCH).unwrap();
+            mtime = mt.as_secs() as u32;
+        },
+        Err(e) => println!("Err get_file_mtime {}", e)
+    };
+    //println!("{:?}", mtime);
+    
+    mtime
+}
+
+
+fn add_files_to_export2(context: &Context, sql: &Sql) -> Result<()> {
+	// add messenger.db and
+    // add all files as blobs to the sql archive database (this does not require
+    // the source to be locked, neigher the destination as it is used only here)
+
+	// Use fix prefixes as paths as paths are different in cmd and Android !
+	// Backup needs to be equal regardless where it is done
+	//  db/messenger.db
+	//  db-blobs/filename.ext
+
+    const BACKUP_FILE_VERSION: i32 = 2;
+    
+    // close the database during the export of the dbfile
+    context.sql.close(context);
+    info!(
+        context,
+        "Backup of '{}'",
+        context.get_dbfile().display(),
+    );
+    
+    sql.set_raw_config_int(context, "backup_file_version", BACKUP_FILE_VERSION)?;
+
+    // copy messenger.db into backup-db
+    let exported_db_file = sql.prepare(
+        "INSERT INTO sqlar (name, mode, mtime, sz, data) VALUES (?, ?, ?, ?, ?);",
+        |mut stmt, _| {
+			let db_name_f = context.get_dbfile(); // type: PathBuf
+			let db_name   = db_name_f.to_string_lossy(); // utf8 string
+
+			// build filename for db (not used any more)
+			//let pnfn: Vec<&str> 	= db_name.rsplitn(2,"/").collect();
+			//let db_filename 		= pnfn[0]; // filename is first item (right to left!)
+			//let db_name_marked  	= ["db/", &db_filename].concat(); // add marker "db/" to db's filename to distinguish from blobs
+
+            // buld filename for db
+			// name of db file in archive is always the same regardless what is used currently!
+			let db_name_marked = "DB/messenger.db";
+
+			info!(context, "EXPORT: db_file, full path={}", db_name);
+			info!(context, "EXPORT: db_file, full name in archive={}", db_name_marked);
+
+            let mtime: u32 = get_file_mtime(&db_name_f);
+            
+			if let Ok(buf) = dc_read_file(context, &db_name_f) {
+				if buf.is_empty() {
+					info!(context, "EXPORT: reading db_file filename={} not possible!", db_name);
+				}
+				else {
+					// bail out if we can't insert
+					stmt.execute(params![db_name_marked, 666 as u32, mtime, buf.len() as u32, buf])?;
+				}
+			}
+			info!(context, "EXPORT: export db_file \"{}\" to archive done", db_name);
+			Ok(true)
+        },
+    )?;
+    ensure!(exported_db_file, "canceled during export db_file!");
+
+    // copy all files from BLOBDIR into backup-db
+    let mut total_files_cnt = 0;
+    let dir = context.get_blobdir();
+    let dir_handle = std::fs::read_dir(&dir)?;
+    total_files_cnt += dir_handle.filter(|r| r.is_ok()).count();
+
+    info!(context, "EXPORT: total_files_cnt={}", total_files_cnt);
+
+    // scan directory, pass 2: copy files
+    let dir_handle = std::fs::read_dir(&dir)?;
+    let exported_all_files = sql.prepare(
+        "INSERT INTO sqlar (name, mode, mtime, sz, data) VALUES (?, ?, ?, ?, ?);",
+        |mut stmt, _| {
+            let mut processed_files_cnt = 0;
+            for entry in dir_handle {
+                let entry = entry?;
+                if context.shall_stop_ongoing() {
+                    return Ok(false);
+                }
+                processed_files_cnt += 1;
+                let permille = max(min(processed_files_cnt * 1000 / total_files_cnt, 990), 10);
+                context.call_cb(Event::ImexProgress(permille));
+
+                let name_f = entry.file_name();
+                let name  = name_f.to_string_lossy();
+
+                if name.starts_with("delta-chat") && name.ends_with(".bak") {
+                    // jump over possible backup file in blob dir
+                    info!(context, "EXPORT: ** skipped ** filename={}", name);
+                    continue;
+                }
+                info!(context, "EXPORT: copying filename={}", name);
+                let curr_path_filename_f = context.get_blobdir().join(&name_f);
+                let curr_path_filename   = ["db-blobs/", &name].concat(); // fix dir prefix
+
+                let mtime: u32 = get_file_mtime(&curr_path_filename_f);
+
+                if let Ok(buf) = dc_read_file(context, &curr_path_filename_f) {
+                    if buf.is_empty() {
+                        continue;
+                    }
+                    // bail out if we can't insert
+                    stmt.execute(params![curr_path_filename, 666 as u32, mtime, buf.len() as u32, buf])?;
+                }
+            }
+            Ok(true)
+        },
+    )?;
+
+    context.sql.open(context, context.get_dbfile(), false);
+
     ensure!(exported_all_files, "canceled during export-files");
     Ok(())
 }

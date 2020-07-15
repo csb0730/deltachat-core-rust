@@ -192,17 +192,24 @@ pub fn dc_receive_imf(
         };
     }
 
-    // if we delete we don't need to try moving messages
-    if needs_delete_job && !created_db_entries.is_empty() {
-        job_add(
-            context,
-            Action::DeleteMsgOnImap,
-            created_db_entries[0].1.to_u32() as i32,
-            Params::new(),
-            0,
-        );
-    } else {
-        context.do_heuristics_moves(server_folder.as_ref(), insert_msg_id);
+    // Get user-configured server deletion
+    let delete_server_after = context.get_config_delete_server_after();
+
+    if !created_db_entries.is_empty() {
+        if needs_delete_job || delete_server_after == Some(0) {
+            for db_entry in &created_db_entries {
+                job_add(
+                    context,
+                    Action::DeleteMsgOnImap,
+                    db_entry.1.to_u32() as i32,
+                    Params::new(),
+                    0,
+                );
+            }
+        } else {
+            // Move message if we don't delete it immediately.
+            context.do_heuristics_moves(server_folder.as_ref(), insert_msg_id);
+        }
     }
 
     info!(
@@ -212,7 +219,7 @@ pub fn dc_receive_imf(
 
     cleanup(context, &create_event_to_send, created_db_entries);
 
-    mime_parser.handle_reports(context, from_id, sent_timestamp, &server_folder, server_uid);
+    mime_parser.handle_reports(context, from_id, sent_timestamp);
 
     Ok(())
 }
@@ -579,10 +586,13 @@ fn add_parts(
             let subject = mime_parser.get_subject().unwrap_or_default();
 
             for part in mime_parser.parts.iter_mut() {
-                if mime_parser.location_kml.is_some()
+                let is_mdn = !mime_parser.reports.is_empty();
+
+                let is_location_kml = mime_parser.location_kml.is_some()
                     && icnt == 1
-                    && (part.msg == "-location-" || part.msg.is_empty())
-                {
+                    && (part.msg == "-location-" || part.msg.is_empty());
+
+                if is_mdn || is_location_kml {
                     *hidden = true;
                     if state == MessageState::InFresh {
                         state = MessageState::InNoticed;

@@ -796,7 +796,6 @@ impl Imap {
         folder: &str,
         uid: u32,
         dest_folder: &str,
-        dest_uid: &mut u32,
     ) -> ImapActionResult {
         task::block_on(async move {
             if folder == dest_folder {
@@ -813,10 +812,6 @@ impl Imap {
                 return imapresult;
             }
             // we are connected, and the folder is selected
-
-            // XXX Rust-Imap provides no target uid on mv, so just set it to 0
-            *dest_uid = 0;
-
             let set = format!("{}", uid);
             let display_folder_id = format!("{}/{}", folder, uid);
 
@@ -996,10 +991,10 @@ impl Imap {
         context: &Context,
         message_id: &str,
         folder: &str,
-        uid: &mut u32,
+        uid: u32,
     ) -> ImapActionResult {
         task::block_on(async move {
-            if let Some(imapresult) = self.prepare_imap_operation_on_msg(context, folder, *uid) {
+            if let Some(imapresult) = self.prepare_imap_operation_on_msg(context, folder, uid) {
                 return imapresult;
             }
             // we are connected, and the folder is selected
@@ -1021,7 +1016,7 @@ impl Imap {
                                 display_imap_id,
                                 message_id,
                             );
-                            return ImapActionResult::Failed;
+                            return ImapActionResult::AlreadyDone;
                         };
 
                         let remote_message_id = get_fetch_headers(fetch)
@@ -1036,7 +1031,7 @@ impl Imap {
                                 remote_message_id,
                                 message_id,
                             );
-                            *uid = 0;
+                            return ImapActionResult::Failed;
                         }
                     }
                     Err(err) => {
@@ -1044,18 +1039,18 @@ impl Imap {
                             context,
                             "Cannot delete {} on IMAP: {}", display_imap_id, err
                         );
-                        *uid = 0;
+                        return ImapActionResult::RetryLater;
                     }
                 }
             }
 
             // mark the message for deletion
-            if !self.add_flag_finalized(context, *uid, "\\Deleted").await {
+            if !self.add_flag_finalized(context, uid, "\\Deleted").await {
                 warn!(
                     context,
                     "Cannot mark message {} as \"Deleted\".", display_imap_id
                 );
-                ImapActionResult::Failed
+                ImapActionResult::RetryLater
             } else {
                 emit_event!(
                     context,
@@ -1296,17 +1291,52 @@ fn precheck_imf(context: &Context, rfc724_mid: &str, server_folder: &str, server
         message::rfc724_mid_exists(context, &rfc724_mid)
     {
         if old_server_folder.is_empty() && old_server_uid == 0 {
-            info!(context, "[move] detected bcc-self {}", rfc724_mid,);
-            context.do_heuristics_moves(server_folder.as_ref(), msg_id);
-            job_add(
+            info!(
                 context,
-                Action::MarkseenMsgOnImap,
-                msg_id.to_u32() as i32,
-                Params::new(),
-                0,
+                "[move] detected bcc-self {} as {}/{}", rfc724_mid, server_folder, server_uid
             );
+
+            let delete_server_after = context.get_config_delete_server_after();
+
+            if delete_server_after != Some(0) {
+                context.do_heuristics_moves(server_folder.as_ref(), msg_id);
+                job_add(
+                    context,
+                    Action::MarkseenMsgOnImap,
+                    msg_id.to_u32() as i32,
+                    Params::new(),
+                    0,
+                );
+            }
         } else if old_server_folder != server_folder {
-            info!(context, "[move] detected moved message {}", rfc724_mid,);
+            info!(
+                context,
+                "[move] detected message {} moved by other device from {}/{} to {}/{}",
+                rfc724_mid,
+                old_server_folder,
+                old_server_uid,
+                server_folder,
+                server_uid
+            );
+        } else if old_server_uid == 0 {
+            info!(
+                context,
+                "[move] detected message {} moved by us from {}/{} to {}/{}",
+                rfc724_mid,
+                old_server_folder,
+                old_server_uid,
+                server_folder,
+                server_uid
+            );
+        } else if old_server_uid != server_uid {
+            warn!(
+                context,
+                "UID for message {} in folder {} changed from {} to {}",
+                rfc724_mid,
+                server_folder,
+                old_server_uid,
+                server_uid
+            );
         }
 
         if old_server_folder != server_folder || old_server_uid != server_uid {

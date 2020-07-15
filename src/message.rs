@@ -85,6 +85,55 @@ impl MsgId {
         self.0 == DC_MSG_ID_DAYMARKER
     }
 
+    /// Put message into trash chat and delete message text.
+    ///
+    /// It means the message is deleted locally, but not on the server
+    /// yet.
+    pub fn trash(self, context: &Context) -> crate::sql::Result<()> {
+        let chat_id = ChatId::new(DC_CHAT_ID_TRASH);
+        sql::execute(
+            context,
+            &context.sql,
+            "UPDATE msgs SET chat_id=?, txt='', txt_raw='' WHERE id=?",
+            params![chat_id, self],
+        )
+    }
+
+    /// Deletes a message and corresponding MDNs from the database.
+    pub fn delete_from_db(self, context: &Context) -> crate::sql::Result<()> {
+        // We don't use transactions yet, so remove MDNs first to make
+        // sure they are not left while the message is deleted.
+        sql::execute(
+            context,
+            &context.sql,
+            "DELETE FROM msgs_mdns WHERE msg_id=?;",
+            params![self],
+        )?;
+        sql::execute(
+            context,
+            &context.sql,
+            "DELETE FROM msgs WHERE id=?;",
+            params![self],
+        )?;
+        Ok(())
+    }
+
+    /// Removes IMAP server UID and folder from the database record.
+    ///
+    /// It is used to avoid trying to remove the message from the
+    /// server multiple times when there are multiple message records
+    /// pointing to the same server UID.
+    pub(crate) fn unlink(self, context: &Context) -> sql::Result<()> {
+        sql::execute(
+            context,
+            &context.sql,
+            "UPDATE msgs \
+             SET server_folder='', server_uid=0 \
+             WHERE id=?",
+            params![self],
+        )
+    }
+
     /// Bad evil escape hatch.
     ///
     /// Avoid using this, eventually types should be cleaned up enough
@@ -303,25 +352,6 @@ impl Message {
                 },
             )
             .map_err(Into::into)
-    }
-
-    pub fn delete_from_db(context: &Context, msg_id: MsgId) {
-        if let Ok(msg) = Message::load_from_db(context, msg_id) {
-            sql::execute(
-                context,
-                &context.sql,
-                "DELETE FROM msgs WHERE id=?;",
-                params![msg.id],
-            )
-            .ok();
-            sql::execute(
-                context,
-                &context.sql,
-                "DELETE FROM msgs_mdns WHERE msg_id=?;",
-                params![msg.id],
-            )
-            .ok();
-        }
     }
 
     pub fn get_filemime(&self) -> Option<String> {
@@ -951,13 +981,15 @@ pub fn get_mime_headers(context: &Context, msg_id: MsgId) -> Option<String> {
 }
 
 pub fn delete_msgs(context: &Context, msg_ids: &[MsgId]) {
-    for msg_id in msg_ids.iter() {
+    for msg_id in msg_ids {
         if let Ok(msg) = Message::load_from_db(context, *msg_id) {
             if msg.location_id > 0 {
                 delete_poi_location(context, msg.location_id);
             }
         }
-        update_msg_chat_id(context, *msg_id, ChatId::new(DC_CHAT_ID_TRASH));
+        if let Err(err) = msg_id.trash(context) {
+            warn!(context, "Unable to trash message {}: {}", msg_id, err);
+        }
         job_add(
             context,
             Action::DeleteMsgOnImap,
@@ -975,16 +1007,6 @@ pub fn delete_msgs(context: &Context, msg_ids: &[MsgId]) {
         job_kill_action(context, Action::Housekeeping);
         job_add(context, Action::Housekeeping, 0, Params::new(), 10);
     };
-}
-
-fn update_msg_chat_id(context: &Context, msg_id: MsgId, chat_id: ChatId) -> bool {
-    sql::execute(
-        context,
-        &context.sql,
-        "UPDATE msgs SET chat_id=? WHERE id=?;",
-        params![chat_id, msg_id],
-    )
-    .is_ok()
 }
 
 fn delete_poi_location(context: &Context, location_id: u32) -> bool {
@@ -1347,10 +1369,55 @@ pub fn get_deaddrop_msg_cnt(context: &Context) -> usize {
     }
 }
 
+pub fn estimate_deletion_cnt(
+    context: &Context,
+    from_server: bool,
+    seconds: i64,
+) -> Result<usize, Error> {
+    let self_chat_id = chat::lookup_by_contact_id(context, DC_CONTACT_ID_SELF)
+        .unwrap_or_default()
+        .0;
+    let threshold_timestamp = time() - seconds;
+
+    let cnt: isize = if from_server {
+        context.sql.query_row(
+            "SELECT COUNT(*)
+             FROM msgs m
+             WHERE m.id > ?
+               AND timestamp < ?
+               AND chat_id != ?
+               AND server_uid != 0;",
+            params![DC_MSG_ID_LAST_SPECIAL, threshold_timestamp, self_chat_id],
+            |row| row.get(0),
+        )?
+    } else {
+        context.sql.query_row(
+            "SELECT COUNT(*)
+             FROM msgs m
+             WHERE m.id > ?
+               AND timestamp < ?
+               AND chat_id != ?
+               AND chat_id != ? AND hidden = 0;",
+            params![
+                DC_MSG_ID_LAST_SPECIAL,
+                threshold_timestamp,
+                self_chat_id,
+                ChatId::new(DC_CHAT_ID_TRASH)
+            ],
+            |row| row.get(0),
+        )?
+    };
+    Ok(cnt as usize)
+}
+
+/// Counts number of database records pointing to specified
+/// Message-ID.
+///
+/// Unlinked messages are excluded.
 pub fn rfc724_mid_cnt(context: &Context, rfc724_mid: &str) -> i32 {
     // check the number of messages with the same rfc724_mid
     match context.sql.query_row(
-        "SELECT COUNT(*) FROM msgs WHERE rfc724_mid=?;",
+        "SELECT COUNT(*) FROM msgs WHERE rfc724_mid=? AND NOT server_uid = 0",
         &[rfc724_mid],
         |row| row.get(0),
     ) {
@@ -1391,7 +1458,8 @@ pub fn update_server_uid(
     server_uid: u32,
 ) {
     match context.sql.execute(
-        "UPDATE msgs SET server_folder=?, server_uid=? WHERE rfc724_mid=?;",
+        "UPDATE msgs SET server_folder=?, server_uid=? \
+         WHERE rfc724_mid=?",
         params![server_folder.as_ref(), server_uid, rfc724_mid],
     ) {
         Ok(_) => {}

@@ -7,7 +7,6 @@ use mailparse::{DispositionType, MailAddr, MailHeaderMap};
 use crate::aheader::Aheader;
 use crate::bail;
 use crate::blob::BlobObject;
-use crate::config::Config;
 use crate::constants::Viewtype;
 use crate::contact::*;
 use crate::context::Context;
@@ -17,7 +16,6 @@ use crate::e2ee;
 use crate::error::Result;
 use crate::events::Event;
 use crate::headerdef::{HeaderDef, HeaderDefMap};
-use crate::job::{job_add, Action};
 use crate::location;
 use crate::message;
 use crate::param::*;
@@ -545,6 +543,16 @@ impl MimeMessage {
                             if let Some(report) = self.process_report(context, mail)? {
                                 self.reports.push(report);
                             }
+
+                            // Add MDN part so we can track it, avoid
+                            // downloading the message again and
+                            // delete if automatic message deletion is
+                            // enabled.
+                            let mut part = Part::default();
+                            part.typ = Viewtype::Unknown;
+                            self.parts.push(part);
+
+                            any_part_added = true;
                         } else {
                             /* eg. `report-type=delivery-status`;
                             maybe we should show them as a little error icon */
@@ -807,19 +815,11 @@ impl MimeMessage {
     }
 
     /// Handle reports (only MDNs for now)
-    pub fn handle_reports(
-        &self,
-        context: &Context,
-        from_id: u32,
-        sent_timestamp: i64,
-        server_folder: impl AsRef<str>,
-        server_uid: u32,
-    ) {
+    pub fn handle_reports(&self, context: &Context, from_id: u32, sent_timestamp: i64) {
         if self.reports.is_empty() {
             return;
         }
 
-        let mut mdn_recognized = false;
         for report in &self.reports {
             for original_message_id in
                 std::iter::once(&report.original_message_id).chain(&report.additional_message_ids)
@@ -828,19 +828,8 @@ impl MimeMessage {
                     message::mdn_from_ext(context, from_id, original_message_id, sent_timestamp)
                 {
                     context.call_cb(Event::MsgRead { chat_id, msg_id });
-                    mdn_recognized = true;
                 }
             }
-        }
-
-        if self.has_chat_version() || mdn_recognized {
-            let mut param = Params::new();
-            param.set(Param::ServerFolder, server_folder.as_ref());
-            param.set_int(Param::ServerUid, server_uid as i32);
-            if self.has_chat_version() && context.get_config_bool(Config::MvboxMove) {
-                param.set_int(Param::AlsoMove, 1);
-            }
-            job_add(context, Action::MarkseenMdnOnImap, 0, param, 0);
         }
     }
 }
@@ -1369,7 +1358,7 @@ Disposition: manual-action/MDN-sent-automatically; displayed\n\
             Some("Chat: Message opened".to_string())
         );
 
-        assert_eq!(message.parts.len(), 0);
+        assert_eq!(message.parts.len(), 1);
         assert_eq!(message.reports.len(), 1);
     }
 
@@ -1447,7 +1436,7 @@ Disposition: manual-action/MDN-sent-automatically; displayed\n\
             Some("Chat: Message opened".to_string())
         );
 
-        assert_eq!(message.parts.len(), 0);
+        assert_eq!(message.parts.len(), 2);
         assert_eq!(message.reports.len(), 2);
     }
 
@@ -1492,7 +1481,7 @@ Additional-Message-IDs: <foo@example.com> <foo@example.net>\n\
             Some("Chat: Message opened".to_string())
         );
 
-        assert_eq!(message.parts.len(), 0);
+        assert_eq!(message.parts.len(), 1);
         assert_eq!(message.reports.len(), 1);
         assert_eq!(message.reports[0].original_message_id, "foo@example.org");
         assert_eq!(
