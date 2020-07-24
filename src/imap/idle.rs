@@ -88,6 +88,7 @@ impl Imap {
                             return Err(Error::IdleProtocolFailed(err));
                         }
 
+                        info!(context, "Idle wait - timeout set to {:?} s", timeout); // cs
                         let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
                         *self.interrupt.lock().await = Some(interrupt);
 
@@ -96,24 +97,24 @@ impl Imap {
                             // provided self.interrupt
                             self.skip_next_idle_wait.store(false, Ordering::SeqCst);
                             std::mem::drop(idle_wait);
-                            info!(context, "Idle wait was skipped");
+                            info!(context, "Idle wait - was skipped");
                         } else {
-                            info!(context, "Idle entering wait-on-remote state");
+                            info!(context, "Idle wait - entering wait-on-remote state");
                             match idle_wait.await {
                                 Ok(IdleResponse::NewData(_)) => {
-                                    info!(context, "Idle has NewData");
+                                    info!(context, "Idle wait - has NewData");
                                 }
                                 // TODO: idle_wait does not distinguish manual interrupts
                                 // from Timeouts if we would know it's a Timeout we could bail
                                 // directly and reconnect .
                                 Ok(IdleResponse::Timeout) => {
-                                    info!(context, "Idle-wait timeout or interruption");
+                                    info!(context, "Idle wait - timeout or interruption");
                                 }
                                 Ok(IdleResponse::ManualInterrupt) => {
-                                    info!(context, "Idle wait was interrupted");
+                                    info!(context, "Idle wait - was interrupted - manual");
                                 }
                                 Err(err) => {
-                                    warn!(context, "Idle wait errored: {:?}", err);
+                                    warn!(context, "Idle wait - error: {:?}", err);
                                 }
                             }
                         }
@@ -153,24 +154,24 @@ impl Imap {
                             // provided self.interrupt
                             self.skip_next_idle_wait.store(false, Ordering::SeqCst);
                             std::mem::drop(idle_wait);
-                            info!(context, "Idle wait was skipped");
+                            info!(context, "Is Idle wait - was skipped");
                         } else {
-                            info!(context, "Idle entering wait-on-remote state");
+                            info!(context, "Is Idle wait - entering wait-on-remote state");
                             match idle_wait.await {
                                 Ok(IdleResponse::NewData(_)) => {
-                                    info!(context, "Idle has NewData");
+                                    info!(context, "Is Idle wait - has NewData");
                                 }
                                 // TODO: idle_wait does not distinguish manual interrupts
                                 // from Timeouts if we would know it's a Timeout we could bail
                                 // directly and reconnect .
                                 Ok(IdleResponse::Timeout) => {
-                                    info!(context, "Idle-wait timeout or interruption");
+                                    info!(context, "Is Idle wait - timeout or interruption");
                                 }
                                 Ok(IdleResponse::ManualInterrupt) => {
-                                    info!(context, "Idle wait was interrupted");
+                                    info!(context, "Is Idle wait - was interrupted - manual");
                                 }
                                 Err(err) => {
-                                    warn!(context, "Idle wait errored: {:?}", err);
+                                    warn!(context, "Is Idle wait - error: {:?}", err);
                                 }
                             }
                         }
@@ -216,7 +217,7 @@ impl Imap {
 
             // check every minute if there are new messages
             // TODO: grow sleep durations / make them more flexible
-            let interval = async_std::stream::interval(Duration::from_secs(60));
+            let interval = async_std::stream::interval(Duration::from_secs(120)); // cs 60 -> 120
             let mut interrupt_interval = interrupt.stop_token().stop_stream(interval);
             *self.interrupt.lock().await = Some(interrupt);
             if self.skip_next_idle_wait.load(Ordering::SeqCst) {

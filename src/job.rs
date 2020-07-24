@@ -3,7 +3,7 @@
 //! This module implements a job queue maintained in the SQLite database
 //! and job types.
 
-use std::{fmt, time};
+use std::{fmt, time, thread}; // thread: sleep
 
 use deltachat_derive::{FromSql, ToSql};
 use itertools::Itertools;
@@ -33,6 +33,7 @@ use crate::sql;
 
 // results in ~3 weeks for the last backoff timespan
 const JOB_RETRIES: u32 = 17;
+
 
 /// Thread IDs
 #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive, FromSql, ToSql)]
@@ -738,6 +739,7 @@ pub fn perform_smtp_idle(context: &Context) {
 
                     if state.idle || res.1.timed_out() {
                         // We received the notification and the value has been updated, we can leave.
+                        info!(context, "SMTP-idle ended by state.idle or res.1.timed_out() - cs",);
                         break;
                     }
                 }
@@ -773,6 +775,9 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
 }
 
 pub fn maybe_network(context: &Context) {
+    // cs: wait a little to slow down system
+    let some_millis = time::Duration::from_millis(500);
+    thread::sleep(some_millis);
     {
         let &(ref lock, _) = &*context.smtp_state.clone();
         let mut state = lock.lock().unwrap();
@@ -992,7 +997,10 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 .suspend(context);
             suspend_smtp_thread(context, true);
         }
-
+        // cs: wait a little to slow down system
+        let some_millis = time::Duration::from_millis(500);
+        thread::sleep(some_millis);
+        
         let try_res = match perform_job_action(context, &mut job, thread, 0) {
             Status::RetryNow => perform_job_action(context, &mut job, thread, 1),
             x => x,
