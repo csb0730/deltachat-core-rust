@@ -4,11 +4,12 @@
 
 - battery drain is more than twice from c-core
     a) imap timeout is coming in an interval of approx 14min not 23min!
-    b) maybe network is always called twice   
+    b) maybe network is always called twice
     c) often try 0 of some jobs are failing, try 1 is working then
     
     => (b, c): try optimizations in adding some sleeps of 500ms to slow down system (jobs.rs)
-    => a: async_std::stream::interval  60 -> 120 (idle.rs)
+    => b: prevent double invocation of maybe_network() (job.rs, context.rs)
+    => a: async_std::stream::interval  60 -> 300 (idle.rs)
     more logging
     
 ## 1.27.1 (cs)

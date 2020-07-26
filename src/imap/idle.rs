@@ -217,7 +217,7 @@ impl Imap {
 
             // check every minute if there are new messages
             // TODO: grow sleep durations / make them more flexible
-            let interval = async_std::stream::interval(Duration::from_secs(120)); // cs 60 -> 120
+            let interval = async_std::stream::interval(Duration::from_secs(300)); // cs 60 -> 300
             let mut interrupt_interval = interrupt.stop_token().stop_stream(interval);
             *self.interrupt.lock().await = Some(interrupt);
             if self.skip_next_idle_wait.load(Ordering::SeqCst) {

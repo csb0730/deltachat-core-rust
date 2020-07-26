@@ -775,9 +775,16 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
 }
 
 pub fn maybe_network(context: &Context) {
+    
+    if *context.maybe_network_active.read().unwrap() {
+        // cs: prevent double invocation
+        info!(context, "maybe_network 2nd call - stopping here => return",);
+        return;
+    }
+    *context.maybe_network_active.write().unwrap() = true;
+    
     // cs: wait a little to slow down system
-    let some_millis = time::Duration::from_millis(500);
-    thread::sleep(some_millis);
+    thread::sleep(time::Duration::from_millis(500));
     {
         let &(ref lock, _) = &*context.smtp_state.clone();
         let mut state = lock.lock().unwrap();
@@ -790,6 +797,8 @@ pub fn maybe_network(context: &Context) {
     interrupt_inbox_idle(context);
     interrupt_mvbox_idle(context);
     interrupt_sentbox_idle(context);
+    
+    *context.maybe_network_active.write().unwrap() = false;
 }
 
 pub fn job_action_exists(context: &Context, action: Action) -> bool {
@@ -998,8 +1007,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
             suspend_smtp_thread(context, true);
         }
         // cs: wait a little to slow down system
-        let some_millis = time::Duration::from_millis(500);
-        thread::sleep(some_millis);
+        thread::sleep(time::Duration::from_millis(500));
         
         let try_res = match perform_job_action(context, &mut job, thread, 0) {
             Status::RetryNow => perform_job_action(context, &mut job, thread, 1),
@@ -1152,7 +1160,7 @@ fn suspend_smtp_thread(context: &Context, suspend: bool) {
             if !context.smtp_state.0.lock().unwrap().doing_jobs {
                 return;
             }
-            std::thread::sleep(time::Duration::from_micros(300 * 1000));
+            std::thread::sleep(time::Duration::from_millis(300));
         }
     }
 }
