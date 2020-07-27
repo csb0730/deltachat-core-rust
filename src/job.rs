@@ -34,6 +34,8 @@ use crate::sql;
 // results in ~3 weeks for the last backoff timespan
 const JOB_RETRIES: u32 = 17;
 
+// cs
+const MIN_SECONDS_BLOCK_MAYBE_NETWORK: i64 = 60;
 
 /// Thread IDs
 #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive, FromSql, ToSql)]
@@ -774,7 +776,16 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
     wakeup_time
 }
 
+
 pub fn maybe_network(context: &Context) {
+    let now = time();
+    
+    if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
+        // cs: prevent too quick invocation
+        info!(context, "maybe_network call - faster {}s - stopping here => return", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
+        return;
+    }
+    *context.last_maybe_network_call.write().unwrap() = now;
     
     if *context.maybe_network_active.read().unwrap() {
         // cs: prevent double invocation
@@ -782,7 +793,7 @@ pub fn maybe_network(context: &Context) {
         return;
     }
     *context.maybe_network_active.write().unwrap() = true;
-    
+    info!(context, "maybe_network - go on",);
     // cs: wait a little to slow down system
     thread::sleep(time::Duration::from_millis(500));
     {

@@ -40,6 +40,7 @@ pub struct Context {
     blobdir: PathBuf,
     /// cs
     pub maybe_network_active: Arc<RwLock<bool>>,
+    pub last_maybe_network_call: RwLock<i64>,
     
     pub sql: Sql,
     pub perform_inbox_jobs_needed: Arc<RwLock<bool>>,
@@ -113,6 +114,7 @@ impl Context {
             blobdir,
             dbfile,
             maybe_network_active: Arc::new(RwLock::new(false)),
+            last_maybe_network_call: RwLock::new(0),
             cb,
             os_name: Some(os_name),
             running_state: Arc::new(RwLock::new(Default::default())),
@@ -166,14 +168,6 @@ impl Context {
         (*self.cb)(self, event);
     }
     
-    // cs
-    //~pub fn get_maybe_network_active(&self) -> bool {
-        //~self.maybe_network_active
-    //~}
-    
-    //~pub fn set_maybe_network_active(&mut self, state: bool) {
-        //~self.maybe_network_active = state;
-    //~}
 
     /*******************************************************************************
      * Ongoing process allocation/free/check

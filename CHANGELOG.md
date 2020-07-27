@@ -4,6 +4,7 @@
 
 - battery drain is more than twice from c-core
     a) imap timeout is coming in an interval of approx 14min not 23min!
+        => b: prevent calling maybeNetwork < 60s interval manually
     b) maybe network is always called twice
     c) often try 0 of some jobs are failing, try 1 is working then
     
