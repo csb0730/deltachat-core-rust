@@ -1,5 +1,18 @@
 # Changelog 
 
+## 1.27.3 (cs)
+
+- change bad retry algorithm (similar version of 0.200. c-core with network state)
+    * better calculation of next retry time
+    * need extension of dc_maybe_network() with connection parameter.
+        0 = disconnected or unknown
+        1 = connected
+        2 = manual call from ui
+    * and/or inc retries only after ++++++ Connected ++++++
+        means dc_maybe_network(n_status = 1)
+    * is extension of interface necessary ?????
+
+
 ## 1.27.2 (cs)
 
 - battery drain is more than twice from c-core
