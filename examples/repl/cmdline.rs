@@ -491,7 +491,7 @@ pub fn dc_cmdline(context: &Context, line: &str) -> Result<(), failure::Error> {
             interrupt_inbox_idle(context);
         }
         "maybenetwork" => {
-            maybe_network(context);
+            maybe_network(context, 1);
         }
         "housekeeping" => {
             sql::housekeeping(context);

@@ -880,7 +880,7 @@ void            dc_interrupt_smtp_idle       (dc_context_t* context);
  * @param context The context as created by dc_context_new().
  * @return None.
  */
-void            dc_maybe_network             (dc_context_t* context);
+void            dc_maybe_network             (dc_context_t* context, int status);
 
 
 /**

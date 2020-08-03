@@ -3,14 +3,26 @@
 ## 1.27.3 (cs)
 
 - change bad retry algorithm (similar version of 0.200. c-core with network state)
-    * better calculation of next retry time
-    * need extension of dc_maybe_network() with connection parameter.
+
+    1. better calculation of next retry time
+
+ok  2. need extension of dc_maybe_network() with connection parameter.
         0 = disconnected or unknown
         1 = connected
-        2 = manual call from ui
-    * and/or inc retries only after ++++++ Connected ++++++
+        2 = manual call from ui (is this done?)
+        
+    3. and/or inc retries only after ++++++ Connected ++++++
         means dc_maybe_network(n_status = 1)
-    * is extension of interface necessary ?????
+
+ok  4. is extension of interface necessary ?????
+        yes, to not inc retry counter when offline try
+        
+ok  5. introduce connection status (is_online) in context (set it by maybe network? see 2.)
+
+    6. don't do any action when offline
+        ok  maybe_network() call
+        other?
+
 
 
 ## 1.27.2 (cs)

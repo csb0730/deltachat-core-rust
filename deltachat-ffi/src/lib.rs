@@ -685,14 +685,14 @@ pub unsafe extern "C" fn dc_interrupt_smtp_idle(context: *mut dc_context_t) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn dc_maybe_network(context: *mut dc_context_t) {
+pub unsafe extern "C" fn dc_maybe_network(context: *mut dc_context_t, status: u32) {
     if context.is_null() {
         eprintln!("ignoring careless call to dc_maybe_network()");
         return;
     }
     let ffi_context = &*context;
     ffi_context
-        .with_inner(|ctx| job::maybe_network(ctx))
+        .with_inner(|ctx| job::maybe_network(ctx, status))
         .unwrap_or(())
 }
 

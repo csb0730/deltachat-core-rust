@@ -35,7 +35,7 @@ use crate::sql;
 const JOB_RETRIES: u32 = 17;
 
 // cs
-const MIN_SECONDS_BLOCK_MAYBE_NETWORK: i64 = 60;
+const MIN_SECONDS_BLOCK_MAYBE_NETWORK: i64 = 30;
 
 /// Thread IDs
 #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive, FromSql, ToSql)]
@@ -777,22 +777,34 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
 }
 
 
-pub fn maybe_network(context: &Context) {
+pub fn maybe_network(context: &Context, status: u32) {
+    
+    if status == 0 {
+        *context.network_online.write().unwrap() = false;
+        info!(context, "maybe_network call - offline - stopping here => return");
+        return;
+    }
+    else {
+        *context.network_online.write().unwrap() = true;
+        info!(context, "maybe_network call - online - go on");
+    }
+    
+    
     let now = time();
     
     if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
-        // cs: prevent too quick invocation
+        // cs: prevent double and too quick invocation
         info!(context, "maybe_network call - faster {}s - stopping here => return", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
         return;
     }
     *context.last_maybe_network_call.write().unwrap() = now;
     
-    if *context.maybe_network_active.read().unwrap() {
-        // cs: prevent double invocation
-        info!(context, "maybe_network 2nd call - stopping here => return",);
-        return;
-    }
-    *context.maybe_network_active.write().unwrap() = true;
+    //~if *context.maybe_network_active.read().unwrap() {
+        //~// cs: prevent double invocation
+        //~info!(context, "maybe_network 2nd call - stopping here => return",);
+        //~return;
+    //~}
+    //~*context.maybe_network_active.write().unwrap() = true;
     info!(context, "maybe_network - go on",);
     // cs: wait a little to slow down system
     thread::sleep(time::Duration::from_millis(500));
@@ -809,7 +821,7 @@ pub fn maybe_network(context: &Context) {
     interrupt_mvbox_idle(context);
     interrupt_sentbox_idle(context);
     
-    *context.maybe_network_active.write().unwrap() = false;
+    //~*context.maybe_network_active.write().unwrap() = false;
 }
 
 pub fn job_action_exists(context: &Context, action: Action) -> bool {
@@ -1018,10 +1030,13 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
             suspend_smtp_thread(context, true);
         }
         // cs: wait a little to slow down system
-        thread::sleep(time::Duration::from_millis(500));
+        thread::sleep(time::Duration::from_millis(300));
         
         let try_res = match perform_job_action(context, &mut job, thread, 0) {
-            Status::RetryNow => perform_job_action(context, &mut job, thread, 1),
+            Status::RetryNow => {
+                thread::sleep(time::Duration::from_millis(200));
+                perform_job_action(context, &mut job, thread, 1)
+                },
             x => x,
         };
 
@@ -1044,12 +1059,19 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
 
         match try_res {
             Status::RetryNow | Status::RetryLater => {
-                let tries = job.tries + 1;
-
+                let tries = if *context.network_online.read().unwrap() {
+                    info!(context, "{} thread, job {} increase tries", thread, job);
+                    job.tries + 1
+                }
+                else {
+                    warn!(context, "{} thread, job {} keep tries as we are offline", thread, job);
+                    job.tries
+                };
+                    
                 if tries < JOB_RETRIES {
                     info!(
                         context,
-                        "{} thread increases job {} tries to {}", thread, job, tries
+                        "{} thread - job {} tries now {}", thread, job, tries
                     );
                     job.tries = tries;
                     let time_offset = get_backoff_time_offset(tries);
@@ -1154,13 +1176,21 @@ fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, trie
 }
 
 fn get_backoff_time_offset(tries: u32) -> i64 {
-    let n = 2_i32.pow(tries - 1) * 60;
-    let mut rng = thread_rng();
-    let r: i32 = rng.gen();
-    let mut seconds = r % (n + 1);
-    if seconds < 1 {
-        seconds = 1;
-    }
+    //~let n = 2_i32.pow(tries - 1) * 60;
+    //~let mut rng = thread_rng();
+    //~let r: i32 = rng.gen();
+    //~let mut seconds = r % (n + 1);
+    //~if seconds < 3 {
+        //~seconds = 3;
+    //~}
+    let seconds = match tries {
+        1..=3 => tries * 60,
+        4..=6 => tries * 240,
+        7..=9 => tries * 1200,
+        10..=12 => tries * 3600,
+        13..=17 => tries * 3600 * 6,
+        _ => tries * 3600 *24,
+    };
     seconds as i64
 }
 

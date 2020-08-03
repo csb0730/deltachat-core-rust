@@ -39,7 +39,7 @@ pub struct Context {
     /// Blob directory path
     blobdir: PathBuf,
     /// cs
-    pub maybe_network_active: Arc<RwLock<bool>>,
+    pub network_online: Arc<RwLock<bool>>,
     pub last_maybe_network_call: RwLock<i64>,
     
     pub sql: Sql,
@@ -113,7 +113,7 @@ impl Context {
         let ctx = Context {
             blobdir,
             dbfile,
-            maybe_network_active: Arc::new(RwLock::new(false)),
+            network_online: Arc::new(RwLock::new(false)),
             last_maybe_network_call: RwLock::new(0),
             cb,
             os_name: Some(os_name),
