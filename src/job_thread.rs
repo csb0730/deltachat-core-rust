@@ -91,6 +91,8 @@ impl JobThread {
                 self.imap.trigger_reconnect();
                 if let Err(err) = self.connect_and_fetch(context).await {
                     warn!(context, "connect+fetch failed: {}", err);
+                    info!(context, "setting last_network_online to false");
+                    *context.last_network_online.write().unwrap() = false;
                 }
             }
         }

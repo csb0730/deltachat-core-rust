@@ -40,6 +40,7 @@ pub struct Context {
     blobdir: PathBuf,
     /// cs
     pub network_online: Arc<RwLock<bool>>,
+    pub last_network_online: Arc<RwLock<bool>>,
     pub last_maybe_network_call: RwLock<i64>,
     
     pub sql: Sql,
@@ -114,6 +115,7 @@ impl Context {
             blobdir,
             dbfile,
             network_online: Arc::new(RwLock::new(false)),
+            last_network_online: Arc::new(RwLock::new(false)),
             last_maybe_network_call: RwLock::new(0),
             cb,
             os_name: Some(os_name),
