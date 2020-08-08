@@ -70,7 +70,7 @@ impl JobThread {
 
         state.idle = true;
         cvar.notify_one();
-        info!(context, "Interrupting {}-IDLE... finished", self.name);
+        //info!(context, "Interrupting {}-IDLE... finished", self.name);
     }
 
     pub async fn fetch(&mut self, context: &Context, use_network: bool) {

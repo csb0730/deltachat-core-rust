@@ -291,7 +291,7 @@ impl Imap {
                 // not have entered idle_wait yet, give it some time
                 // for that to happen. XXX handle this without extra wait
                 // https://github.com/deltachat/deltachat-core-rust/issues/925
-                std::thread::sleep(Duration::from_millis(300)); // cs: 200->300
+                std::thread::sleep(Duration::from_millis(200)); // cs: 200
                 info!(context, "low-level: dropping stop-source to interrupt idle");
                 std::mem::drop(interrupt)
             }

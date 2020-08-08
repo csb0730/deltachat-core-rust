@@ -664,7 +664,7 @@ pub fn perform_sentbox_idle(context: &Context) {
 }
 
 pub fn interrupt_inbox_idle(context: &Context) {
-    info!(context, "interrupt_inbox_idle called");
+    info!(context, "interrupt_inbox_idle: called");
     // we do not block on trying to obtain the thread lock
     // because we don't know in which state the thread is.
     // If it's currently fetching then we can not get the lock
@@ -751,7 +751,6 @@ pub fn perform_smtp_idle(context: &Context) {
             }
         }
     }
-
     info!(context, "SMTP-idle ended.",);
 }
 
@@ -783,12 +782,12 @@ pub fn maybe_network(context: &Context, status: u32) {
 
     if status == 0 {
         *context.network_online.write().unwrap() = false;
-        info!(context, "maybe_network call - offline - stopping here => return");
+        info!(context, "maybe_network: call - offline - stopping here => return");
         return;
     }
     else {
         *context.network_online.write().unwrap() = true;
-        info!(context, "maybe_network call - online - go on");
+        info!(context, "maybe_network: call - online - go on");
     }
     
     
@@ -796,12 +795,12 @@ pub fn maybe_network(context: &Context, status: u32) {
     
     if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
         // cs: prevent double and too quick invocation
-        info!(context, "maybe_network call - faster {}s - stopping here => return", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
+        info!(context, "maybe_network: call - faster {}s - stopping here => return", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
         return;
     }
     *context.last_maybe_network_call.write().unwrap() = now;
     
-    info!(context, "maybe_network - working ...");
+    info!(context, "maybe_network: working ...");
     // cs: wait a little to slow down system
     thread::sleep(time::Duration::from_millis(500));
     {
@@ -817,7 +816,7 @@ pub fn maybe_network(context: &Context, status: u32) {
     interrupt_mvbox_idle(context);
     interrupt_sentbox_idle(context);
     
-    info!(context, "maybe_network - finished");
+    info!(context, "maybe_network: finished");
 }
 
 pub fn job_action_exists(context: &Context, action: Action) -> bool {
@@ -980,7 +979,7 @@ fn add_imap_deletion_jobs(context: &Context) -> sql::Result<()> {
 }
 
 pub fn perform_inbox_jobs(context: &Context) {
-    info!(context, "dc_perform_inbox_jobs starting.",);
+    info!(context, "perform_inbox_jobs: called",);
 
     let probe_imap_network = *context.probe_imap_network.clone().read().unwrap();
     *context.probe_imap_network.write().unwrap() = false;
@@ -990,26 +989,27 @@ pub fn perform_inbox_jobs(context: &Context) {
         warn!(context, "Can't add IMAP message deletion jobs: {}", err);
     }
     job_perform(context, Thread::Imap, probe_imap_network);
-    info!(context, "dc_perform_inbox_jobs ended.",);
+    //info!(context, "perform_inbox_jobs ended.",);
 }
 
 pub fn perform_mvbox_jobs(context: &Context) {
-    info!(context, "dc_perform_mbox_jobs EMPTY (for now).",);
+    //info!(context, "perform_mbox_jobs ++ EMPTY ++ (for now).",);
 }
 
 pub fn perform_sentbox_jobs(context: &Context) {
-    info!(context, "dc_perform_sentbox_jobs EMPTY (for now).",);
+    //info!(context, "perform_sentbox_jobs ++ EMPTY ++ (for now).",);
 }
 
 fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
+    info!(context, "{} job_perform: called  - probe_network {}", thread, probe_network);
     while let Some(mut job) = load_next_job(context, thread, probe_network) {
         
         if *context.network_online.read().unwrap() == false {
-            info!(context, "{}-job {} - tries {} - stop execution, being offline!", thread, job, job.tries);
+            info!(context, "{} job #{} - tries #{} - stop execution, being offline!", thread, job, job.tries);
             return;
         }
 
-        info!(context, "{}-job {} - tries {} - started...", thread, job, job.tries);
+        info!(context, "{} job #{} - tries #{} - started...", thread, job, job.tries);
 
         // some configuration jobs are "exclusive":
         // - they are always executed in the imap-thread and the smtp-thread is suspended during execution
@@ -1067,12 +1067,12 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 
                 let tries = if net_onl && last_net_onl {
                     // only increase tries if network is stable
-                    info!(context, "{} thread, job {} increase tries", thread, job);
+                    info!(context, "{} job #{} increase tries", thread, job);
                     job.tries + 1
                 }
                 else {
                     warn!(context,
-                        "{} thread, job {} don't increase tries, net_onl {}, last_net_onl {}",
+                        "{} job #{} keep tries, net_onl {}, last_net_onl {}",
                         thread,
                         job,
                         net_onl,
@@ -1083,7 +1083,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if tries < JOB_RETRIES {
                     info!(
                         context,
-                        "{} thread - job {} tries now {}", thread, job, tries
+                        "{} job #{} tries now {}", thread, job, tries
                     );
                     job.tries = tries;
                     let time_offset = get_backoff_time_offset(tries);
@@ -1091,7 +1091,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     job.update(context);
                     info!(
                         context,
-                        "{}-job #{} not succeeded on try #{}, retry in {} seconds.",
+                        "{} job #{} not succeeded on try #{}, retry in {} seconds.",
                         thread,
                         job.job_id as u32,
                         tries,
@@ -1109,7 +1109,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 } else {
                     info!(
                         context,
-                        "{} thread removes job {} as it exhausted {} retries",
+                        "{} removes job {} as it exhausted {} retries",
                         thread,
                         job,
                         JOB_RETRIES
@@ -1154,7 +1154,10 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
 fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, tries: u32) -> Status {
     info!(
         context,
-        "{} perform_job_action: begin immediate try {} of job {}", thread, tries, job
+        "{} perform_job_action: begin immediate try #{} of job #{}",
+        thread,
+        tries,
+        job
     );
 
     let try_res = match job.action {
@@ -1266,9 +1269,10 @@ pub fn job_add(
         error!(context, "Invalid action passed to job_add");
         return;
     }
-
     let timestamp = time();
     let thread: Thread = action.into();
+
+    info!(context, "{} job_add: action {}, foreign_id {}, delay_seconds {}", thread, action, foreign_id, delay_seconds);
 
     sql::execute(
         context,
@@ -1292,7 +1296,7 @@ pub fn job_add(
 }
 
 pub fn interrupt_smtp_idle(context: &Context) {
-    info!(context, "Interrupting SMTP-idle...",);
+    info!(context, "interrupt_smtp_idle: called",);
 
     let &(ref lock, ref cvar) = &*context.smtp_state.clone();
     let mut state = lock.lock().unwrap();
@@ -1300,7 +1304,7 @@ pub fn interrupt_smtp_idle(context: &Context) {
     state.perform_jobs_needed = PerformJobsNeeded::AtOnce;
     state.idle = true;
     cvar.notify_one();
-    info!(context, "Interrupting SMTP-idle... ended",);
+    //info!(context, "interrupt_smtp_idle: ended",);
 }
 
 /// Load jobs from the database.
