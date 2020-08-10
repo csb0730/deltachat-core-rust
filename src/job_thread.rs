@@ -74,6 +74,7 @@ impl JobThread {
     }
 
     pub async fn fetch(&mut self, context: &Context, use_network: bool) {
+        info!(context, "(1) JobThread::fetch");
         {
             let &(ref lock, _) = &*self.state.clone();
             let mut state = lock.lock().unwrap();
@@ -100,6 +101,7 @@ impl JobThread {
     }
 
     async fn connect_and_fetch(&mut self, context: &Context) -> Result<()> {
+        info!(context, "(1) JobThread::connect_and_fetch");
         let prefix = format!("{}-fetch", self.name);
         match self.imap.connect_configured(context) {
             Ok(()) => {

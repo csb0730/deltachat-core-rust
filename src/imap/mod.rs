@@ -471,8 +471,11 @@ impl Imap {
             // probably shutdown
             return Err(Error::InTeardown);
         }
+        
         self.setup_handle_if_needed(context).await?;
-
+        
+        info!(context, "(1) Imap::fetch");
+        
         while self.fetch_new_messages(context, &watch_folder).await? {
             // We fetch until no more new messages are there.
         }
@@ -588,6 +591,7 @@ impl Imap {
         context: &Context,
         folder: S,
     ) -> Result<bool> {
+        info!(context, "Imap::fetch_new_messages");
         let show_emails =
             ShowEmails::from_i32(context.get_config_int(Config::ShowEmails)).unwrap_or_default();
 

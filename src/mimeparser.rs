@@ -618,11 +618,20 @@ impl MimeMessage {
                         };
 
                         let (simplified_txt, is_forwarded) = if decoded_data.is_empty() {
-                            ("".into(), false)
+                            ("decoced_data is empty!".into(), false)
                         } else {
                             let is_html = mime_type == mime::TEXT_HTML;
                             let out = if is_html {
-                                dehtml(&decoded_data)
+                                // cs: NOK html code produces empty string ?
+                                let dd = dehtml(&decoded_data);
+                                let dd1 = String::from(&decoded_data);
+                                if dd.len() < 1 {
+                                    info!(context, "decoded_data1: {}", dd1);
+                                    dd1
+                                } else {
+                                    info!(context, "decoded_data: {}", dd);
+                                    dd
+                                }
                             } else {
                                 decoded_data.clone()
                             };

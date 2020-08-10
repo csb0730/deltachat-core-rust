@@ -27,7 +27,8 @@ enum AddText {
 // the newlines are typically removed in further processing by the caller
 pub fn dehtml(buf: &str) -> String {
     let buf = buf.trim();
-
+    let buf1 = String::from(buf);
+    
     let mut dehtml = Dehtml {
         strbuilder: String::with_capacity(buf.len()),
         add_text: AddText::YesRemoveLineEnds,
@@ -35,6 +36,7 @@ pub fn dehtml(buf: &str) -> String {
     };
 
     let mut reader = quick_xml::Reader::from_str(buf);
+    reader.check_end_names(false);
 
     let mut buf = Vec::new();
 
@@ -48,9 +50,10 @@ pub fn dehtml(buf: &str) -> String {
             Ok(quick_xml::events::Event::CData(ref e)) => dehtml_cdata_cb(e, &mut dehtml),
             Err(e) => {
                 eprintln!(
-                    "Parse html error: Error at position {}: {:?}",
+                    "Parse html error: Error at position {}: {:?} \n\n{:?}",
                     reader.buffer_position(),
-                    e
+                    e,
+                    buf1
                 );
             }
             Ok(quick_xml::events::Event::Eof) => break,

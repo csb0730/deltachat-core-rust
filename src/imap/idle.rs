@@ -88,7 +88,7 @@ impl Imap {
                             return Err(Error::IdleProtocolFailed(err));
                         }
 
-                        info!(context, "Idle wait - timeout set to {:?} s", timeout); // cs
+                        info!(context, "Idle wait (Secure) - timeout set to {:?} s", timeout); // cs
                         let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
                         *self.interrupt.lock().await = Some(interrupt);
 
@@ -146,6 +146,7 @@ impl Imap {
                             return Err(Error::IdleProtocolFailed(err));
                         }
 
+                        info!(context, "Idle wait (Inecure) - timeout set to {:?} s", timeout); // cs
                         let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
                         *self.interrupt.lock().await = Some(interrupt);
 

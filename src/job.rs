@@ -970,7 +970,7 @@ fn add_imap_deletion_jobs(context: &Context) -> sql::Result<()> {
                 Action::DeleteMsgOnImap,
                 msg_id.to_u32() as i32,
                 Params::new(),
-                0,
+                1,
             )
         }
     }
@@ -992,24 +992,24 @@ pub fn perform_inbox_jobs(context: &Context) {
     //info!(context, "perform_inbox_jobs ended.",);
 }
 
-pub fn perform_mvbox_jobs(context: &Context) {
+pub fn perform_mvbox_jobs(_context: &Context) {
     //info!(context, "perform_mbox_jobs ++ EMPTY ++ (for now).",);
 }
 
-pub fn perform_sentbox_jobs(context: &Context) {
+pub fn perform_sentbox_jobs(_context: &Context) {
     //info!(context, "perform_sentbox_jobs ++ EMPTY ++ (for now).",);
 }
 
 fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
     info!(context, "{} job_perform: called  - probe_network {}", thread, probe_network);
     while let Some(mut job) = load_next_job(context, thread, probe_network) {
-        
+        info!(context, "{} job {} - tries {} - action {}", thread, job, job.tries, job.action);
         if *context.network_online.read().unwrap() == false {
-            info!(context, "{} job #{} - tries #{} - stop execution, being offline!", thread, job, job.tries);
+            info!(context, "{} job {} - tries {} - stop execution, being offline!", thread, job, job.tries);
             return;
         }
 
-        info!(context, "{} job #{} - tries #{} - started...", thread, job, job.tries);
+        info!(context, "{} job {} - tries {} - action {} started...", thread, job, job.tries, job.action);
 
         // some configuration jobs are "exclusive":
         // - they are always executed in the imap-thread and the smtp-thread is suspended during execution
@@ -1067,12 +1067,12 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 
                 let tries = if net_onl && last_net_onl {
                     // only increase tries if network is stable
-                    info!(context, "{} job #{} increase tries", thread, job);
+                    info!(context, "{} job {} increase tries", thread, job);
                     job.tries + 1
                 }
                 else {
                     warn!(context,
-                        "{} job #{} keep tries, net_onl {}, last_net_onl {}",
+                        "{} job {} keep tries, net_onl {}, last_net_onl {}",
                         thread,
                         job,
                         net_onl,
@@ -1083,7 +1083,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if tries < JOB_RETRIES {
                     info!(
                         context,
-                        "{} job #{} tries now {}", thread, job, tries
+                        "{} job {} tries now {}", thread, job, tries
                     );
                     job.tries = tries;
                     let time_offset = get_backoff_time_offset(tries);
@@ -1091,7 +1091,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     job.update(context);
                     info!(
                         context,
-                        "{} job #{} not succeeded on try #{}, retry in {} seconds.",
+                        "{} job {} not succeeded on try {}, retry in {} seconds.",
                         thread,
                         job.job_id as u32,
                         tries,
@@ -1154,7 +1154,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
 fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, tries: u32) -> Status {
     info!(
         context,
-        "{} perform_job_action: begin immediate try #{} of job #{}",
+        "{} perform_job_action: begin immediate try {} of job {}",
         thread,
         tries,
         job
@@ -1230,7 +1230,7 @@ fn send_mdn(context: &Context, msg: &Message) -> Result<()> {
     let mut param = Params::new();
     param.set(Param::MsgId, msg.id.to_u32().to_string());
 
-    job_add(context, Action::SendMdn, msg.from_id as i32, param, 0);
+    job_add(context, Action::SendMdn, msg.from_id as i32, param, 1);
 
     Ok(())
 }
@@ -1251,7 +1251,7 @@ fn add_smtp_job(
     param.set(Param::File, blob.as_name());
     param.set(Param::Recipients, &recipients);
 
-    job_add(context, action, msg_id.to_u32() as i32, param, 0);
+    job_add(context, action, msg_id.to_u32() as i32, param, 1);
 
     Ok(())
 }
