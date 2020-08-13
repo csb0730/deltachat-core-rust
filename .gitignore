@@ -1,6 +1,8 @@
 /target
 **/*.rs.bk
 
+/test-data
+
 # ignore vi temporaries
 *~
 *.swp

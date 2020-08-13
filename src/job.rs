@@ -743,7 +743,11 @@ pub fn perform_smtp_idle(context: &Context) {
 
                     if state.idle || res.1.timed_out() {
                         // We received the notification and the value has been updated, we can leave.
-                        info!(context, "SMTP-idle ended by state.idle or res.1.timed_out() - cs",);
+                        if state.idle {
+                            info!(context, "SMTP-idle ended by state.idle - cs",);
+                        } else {
+                            info!(context, "SMTP-idle ended by res.1.timed_out() - cs",);
+                        }
                         break;
                     }
                 }
@@ -769,7 +773,7 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
     if t > 0 {
         if t > now {
             wakeup_time = time::Duration::new((t - now) as u64, 0);
-        } else {
+        } else if *context.network_online.read().unwrap() == true {
             wakeup_time = time::Duration::new(0, 0);
         }
     }
