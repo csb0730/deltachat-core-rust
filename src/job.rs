@@ -1007,7 +1007,7 @@ pub fn perform_sentbox_jobs(_context: &Context) {
 fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
     info!(context, "{} job_perform: called  - probe_network {}", thread, probe_network);
     while let Some(mut job) = load_next_job(context, thread, probe_network) {
-        info!(context, "{} job {} - tries {} - action {}", thread, job, job.tries, job.action);
+        info!(context, "{} job {} loaded - tries {} - action {}", thread, job, job.tries, job.action);
         if *context.network_online.read().unwrap() == false {
             info!(context, "{} job {} - tries {} - stop execution, being offline!", thread, job, job.tries);
             return;
@@ -1069,8 +1069,11 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 let net_onl = *context.network_online.read().unwrap();
                 let last_net_onl = *context.last_network_online.read().unwrap();
                 
-                let tries = if net_onl && last_net_onl {
+                let tries = if net_onl && (last_net_onl ||
+                                           job.action == Action::DeleteMsgOnImap ||
+                                           job.action == Action::OldDeleteMsgOnImap){
                     // only increase tries if network is stable
+                    // the delete jobs often fails if message is not at server
                     info!(context, "{} job {} increase tries", thread, job);
                     job.tries + 1
                 }
@@ -1191,7 +1194,7 @@ fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, trie
 
     info!(
         context,
-        "{} finished immediate try {} of job {}", thread, tries, job
+        "{} finished immediate try {} of job {} - try_res {}", thread, tries, job, try_res
     );
 
     try_res

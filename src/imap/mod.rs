@@ -614,6 +614,9 @@ impl Imap {
             return Err(Error::NoConnection);
         };
 
+        // cs fetch successful => network ok
+        *context.last_network_online.write().unwrap() = true;
+
         // prefetch info from all unfetched mails
         let mut new_last_seen_uid = last_seen_uid;
         let mut read_errors = 0;
