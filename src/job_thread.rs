@@ -61,8 +61,7 @@ impl JobThread {
             self.state.0.lock().unwrap().jobs_needed = true;
         }
 
-        info!(context, "Interrupting {}-IDLE...", self.name);
-
+        info!(context, "JobThread::interrupt_idle, Interrupting {}-IDLE...", self.name);
         self.imap.interrupt_idle(context);
 
         let &(ref lock, ref cvar) = &*self.state.clone();
@@ -74,7 +73,7 @@ impl JobThread {
     }
 
     pub async fn fetch(&mut self, context: &Context, use_network: bool) {
-        info!(context, "(1) JobThread::fetch");
+        info!(context, "JobThread::fetch {}-thread", self.name);
         {
             let &(ref lock, _) = &*self.state.clone();
             let mut state = lock.lock().unwrap();
@@ -88,12 +87,12 @@ impl JobThread {
 
         if use_network {
             if let Err(err) = self.connect_and_fetch(context).await {
-                warn!(context, "connect+fetch failed: {}, reconnect & retry", err);
+                warn!(context, "connect+fetch failed: {}, reconnect & retry {}-thread", err, self.name);
                 self.imap.trigger_reconnect();
                 if let Err(err) = self.connect_and_fetch(context).await {
-                    warn!(context, "connect+fetch failed: {}", err);
-                    info!(context, "setting last_network_online to false");
-                    *context.last_network_online.write().unwrap() = false;
+                    warn!(context, "connect+fetch failed (2nd try): {}, {}-thread", err, self.name);
+                    info!(context, "setting network_online to false");
+                    *context.network_online.write().unwrap() = false;
                 }
             }
         }
@@ -101,10 +100,12 @@ impl JobThread {
     }
 
     async fn connect_and_fetch(&mut self, context: &Context) -> Result<()> {
-        info!(context, "(1) JobThread::connect_and_fetch");
+        info!(context, "JobThread::connect_and_fetch {}-thread", self.name);
         let prefix = format!("{}-fetch", self.name);
         match self.imap.connect_configured(context) {
             Ok(()) => {
+                info!(context, "setting network_online to true");
+                *context.network_online.write().unwrap() = true;
                 if let Some(watch_folder) = self.get_watch_folder(context) {
                     let start = std::time::Instant::now();
                     info!(context, "{} started...", prefix);
@@ -114,7 +115,7 @@ impl JobThread {
                         .await
                         .map_err(Into::into);
                     let elapsed = start.elapsed().as_millis();
-                    info!(context, "{} done in {:.3} ms.", prefix, elapsed);
+                    info!(context, "{} done in {:.3} ms", prefix, elapsed);
 
                     res
                 } else {

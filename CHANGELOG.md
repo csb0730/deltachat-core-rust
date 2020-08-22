@@ -1,5 +1,8 @@
 # Changelog 
 
+## 1 27.4 (cs)
+
+
 ## 1.27.3 (cs)
 
 - change bad retry algorithm (similar version of 0.200. c-core with network state)

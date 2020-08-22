@@ -40,8 +40,9 @@ pub struct Context {
     blobdir: PathBuf,
     /// cs
     pub network_online: Arc<RwLock<bool>>,
-    pub last_network_online: Arc<RwLock<bool>>,
+    pub last_job_success: Arc<RwLock<bool>>,
     pub last_maybe_network_call: RwLock<i64>,
+    pub last_fetchworker_call: RwLock<i64>,
     
     pub sql: Sql,
     pub perform_inbox_jobs_needed: Arc<RwLock<bool>>,
@@ -115,8 +116,9 @@ impl Context {
             blobdir,
             dbfile,
             network_online: Arc::new(RwLock::new(false)),
-            last_network_online: Arc::new(RwLock::new(false)),
+            last_job_success: Arc::new(RwLock::new(false)),
             last_maybe_network_call: RwLock::new(0),
+            last_fetchworker_call: RwLock::new(0),
             cb,
             os_name: Some(os_name),
             running_state: Arc::new(RwLock::new(Default::default())),
