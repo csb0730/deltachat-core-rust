@@ -1,28 +1,33 @@
 # Changelog 
 
 ## 1 27.4 (cs)
+- change bad retry algorythm
+- don't start any job action when offline
+- introduce network_online status
+    set it by several conditions and device status
+- increase retry counter only when two consecutive jobs are failing
 
 
 ## 1.27.3 (cs)
 
 - change bad retry algorithm (similar version of 0.200. c-core with network state)
 
-    1. better calculation of next retry time
+ok  1. better calculation of next retry time
 
 ok  2. need extension of dc_maybe_network() with connection parameter.
         0 = disconnected or unknown
         1 = connected
         2 = manual call from ui (is this done?)
         
-    3. and/or inc retries only after ++++++ Connected ++++++
+ok  3. and/or inc retries only after in connected status
         means dc_maybe_network(n_status = 1)
 
 ok  4. is extension of interface necessary ?????
         yes, to not inc retry counter when offline try
         
-ok  5. introduce connection status (is_online) in context (set it by maybe network? see 2.)
+ok  5. introduce connection status (network_online) in context
 
-    6. don't do any action when offline
+ok  6. don't do any action when offline
         ok  maybe_network() call
         other?
 

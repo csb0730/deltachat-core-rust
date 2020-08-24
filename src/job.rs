@@ -726,11 +726,19 @@ pub fn interrupt_inbox_idle_2(context: &Context) {
 
 
 pub fn interrupt_mvbox_idle(context: &Context) {
+    let active = context.get_config_bool(Config::MvboxWatch);
+    if !active {
+        return;
+    }
     info!(context, "interrupt_mvbox_idle called ...",);
     context.mvbox_thread.read().unwrap().interrupt_idle(context);
 }
 
 pub fn interrupt_sentbox_idle(context: &Context) {
+    let active = context.get_config_bool(Config::SentboxWatch);
+    if !active {
+        return;
+    }
     info!(context, "interrupt_sentbox_idle called ...",);
     context.sentbox_thread.read().unwrap().interrupt_idle(context);
 }
@@ -1125,12 +1133,12 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     //   Maybe this simple doing here is not really correct !!!
                     *context.last_job_success.write().unwrap() = false;
                     
-                    info!(context, "{} job {} increase tries", thread, job);
+                    info!(context, "{} job #{}, increase tries", thread, job);
                     job.tries + 1
                 }
                 else {
                     warn!(context,
-                        "{} job {} keep tries, net_onl {}, last_job_success {}",
+                        "{} job #{}, keep tries, net_onl {}, last_job_success {}",
                         thread,
                         job,
                         net_onl,
@@ -1141,7 +1149,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if tries < JOB_RETRIES {
                     info!(
                         context,
-                        "{} job {} tries now {}", thread, job, tries
+                        "{} job #{}, tries now {}", thread, job, tries
                     );
                     job.tries = tries;
                     let time_offset = get_backoff_time_offset(tries);
@@ -1149,7 +1157,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     job.update(context);
                     info!(
                         context,
-                        "{} job {} not succeeded on try {}, retry in {} seconds.",
+                        "{} job #{}, not succeeded on try {}, retry in {} seconds.",
                         thread,
                         job.job_id as u32,
                         tries,
@@ -1167,7 +1175,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 } else {
                     info!(
                         context,
-                        "{} removes job {} as it exhausted {} retries",
+                        "{} remove job #{} as it exhausted {} retries",
                         thread,
                         job,
                         JOB_RETRIES
@@ -1194,12 +1202,12 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if let Err(err) = res {
                     warn!(
                         context,
-                        "{} removes job {} as it failed with error {:?}", thread, job, err
+                        "{} remove job #{} as it failed with error {:?}", thread, job, err
                     );
                 } else {
-                    info!(context, "{} removes job {} as it succeeded", thread, job);
+                    info!(context, "{} remove job #{} as it succeeded", thread, job);
                     
-                    info!(context, "{} setting last_job_success to true", thread);
+                    info!(context, "{} job #{}, setting last_job_success to true", thread, job);
                     // network state is online when job succeeds
                     *context.last_job_success.write().unwrap() = true;
                 }
