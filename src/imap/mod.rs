@@ -332,10 +332,10 @@ impl Imap {
     }
 
     async fn unsetup_handle(&self, context: &Context) {
-        info!(
-            context,
-            "IMAP unsetup_handle step 2 (acquiring session.lock)"
-        );
+        //~info!(
+            //~context,
+            //~"IMAP unsetup_handle step 2 (acquiring session.lock)"
+        //~);
         if let Some(mut session) = self.session.lock().await.take() {
             if let Err(err) = session.close().await {
                 warn!(context, "failed to close connection: {:?}", err);
@@ -343,10 +343,10 @@ impl Imap {
         }
         *self.connected.lock().await = false;
 
-        info!(context, "IMAP unsetup_handle step 3 (clearing config).");
+        //info!(context, "IMAP unsetup_handle step 3 (clearing config).");
         self.config.write().await.selected_folder = None;
         self.config.write().await.selected_mailbox = None;
-        info!(context, "IMAP unsetup_handle step 4 (disconnected)");
+        info!(context, "IMAP unsetup_handle (disconnected)");
     }
 
     async fn free_connect_params(&self) {
@@ -615,6 +615,7 @@ impl Imap {
         };
 
         // cs fetch successful => network ok
+        info!(context, "setting network_online => true");
         *context.network_online.write().unwrap() = true;
 
         // prefetch info from all unfetched mails

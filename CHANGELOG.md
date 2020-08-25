@@ -1,6 +1,9 @@
 # Changelog 
 
-## 1 27.4 (cs)
+## 1.27.5
+- no "probe_network"
+
+## 1.27.4 (cs)
 - change bad retry algorythm
 - don't start any job action when offline
 - introduce network_online status

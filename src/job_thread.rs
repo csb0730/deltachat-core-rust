@@ -91,7 +91,7 @@ impl JobThread {
                 self.imap.trigger_reconnect();
                 if let Err(err) = self.connect_and_fetch(context).await {
                     warn!(context, "connect+fetch failed (2nd try): {}, {}-thread", err, self.name);
-                    info!(context, "setting network_online to false");
+                    info!(context, "setting +++ network_online +++ => false");
                     *context.network_online.write().unwrap() = false;
                 }
             }
@@ -104,7 +104,7 @@ impl JobThread {
         let prefix = format!("{}-fetch", self.name);
         match self.imap.connect_configured(context) {
             Ok(()) => {
-                info!(context, "setting network_online to true");
+                info!(context, "setting +++ network_online +++ => true");
                 *context.network_online.write().unwrap() = true;
                 if let Some(watch_folder) = self.get_watch_folder(context) {
                     let start = std::time::Instant::now();
@@ -148,7 +148,7 @@ impl JobThread {
             if state.jobs_needed {
                 info!(
                     context,
-                    "{}-IDLE will not be started as it was interrupted while not idling.",
+                    "{}-IDLE will not be started as jobs are needed (it was interrupted while not idling)",
                     self.name,
                 );
                 state.jobs_needed = false;

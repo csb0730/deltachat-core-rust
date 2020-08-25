@@ -252,7 +252,7 @@ impl Job {
             let loginparam = LoginParam::from_database(context, "configured_");
             if let Err(err) = context.smtp.lock().unwrap().connect(context, &loginparam) {
                 warn!(context, "SMTP connection failure: {:?}", err);
-                info!(context, "setting network_online to false");
+                info!(context, "setting +++ network_online +++ => false");
                 *context.network_online.write().unwrap() = false;
                 return Status::RetryLater;
             }
@@ -806,7 +806,7 @@ pub fn perform_smtp_idle(context: &Context) {
             }
         }
     }
-    info!(context, "SMTP-idle ended.",);
+    //info!(context, "SMTP-idle ended.",);
 }
 
 fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
@@ -819,13 +819,14 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
         )
         .unwrap_or_default();
 
-    let mut wakeup_time = time::Duration::new(10 * 60, 0);
+    let mut wakeup_time = time::Duration::new(20 * 60, 0); // 10 -> 20 min
     let now = time();
     if t > 0 {
+        info!(context, "get_next_wakeup_time: MIN(desired_timestamp): {}", t);
         if t > now {
             wakeup_time = time::Duration::new((t - now) as u64, 0);
         } else if *context.network_online.read().unwrap() == true {
-            wakeup_time = time::Duration::new(0, 0);
+            wakeup_time = time::Duration::new(3, 0);
         }
     }
 
@@ -850,7 +851,7 @@ pub fn maybe_network(context: &Context, status: u32) {
     
     if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
         // cs: prevent double and too quick invocation
-        info!(context, "maybe_network: call - faster {}s - stopping here", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
+        info!(context, "maybe_network: faster {}s - stopping here", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
         return;
     }
     *context.last_maybe_network_call.write().unwrap() = now;
@@ -858,12 +859,17 @@ pub fn maybe_network(context: &Context, status: u32) {
     info!(context, "maybe_network: working ... interrupting all idles");
     // cs: wait a little to slow down system
     thread::sleep(time::Duration::from_millis(500));
+    
     {
         let &(ref lock, _) = &*context.smtp_state.clone();
         let mut state = lock.lock().unwrap();
-        state.probe_network = true;
+        info!(context, "maybe_network: don't set probe_network (for testing)");
+        // cs: do not use probe_network any more as we are only trying jobs now when being online
+        state.probe_network = false;
+        //state.probe_network = true;
 
-        *context.probe_imap_network.write().unwrap() = true;
+        *context.probe_imap_network.write().unwrap() = false;
+        //*context.probe_imap_network.write().unwrap() = true;
     }
 
     interrupt_smtp_idle(context);
@@ -1207,7 +1213,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 } else {
                     info!(context, "{} remove job #{} as it succeeded", thread, job);
                     
-                    info!(context, "{} job #{}, setting last_job_success to true", thread, job);
+                    info!(context, "{} job #{}, setting last_job_success => true", thread, job);
                     // network state is online when job succeeds
                     *context.last_job_success.write().unwrap() = true;
                 }
