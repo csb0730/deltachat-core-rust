@@ -474,7 +474,7 @@ impl Imap {
         
         self.setup_handle_if_needed(context).await?;
         
-        info!(context, "Imap::fetch");
+        //info!(context, "Imap::fetch");
         
         while self.fetch_new_messages(context, &watch_folder).await? {
             // We fetch until no more new messages are there.
@@ -615,7 +615,7 @@ impl Imap {
         };
 
         // cs fetch successful => network ok
-        info!(context, "setting network_online => true");
+        info!(context, "setting +++ network_online +++ => true");
         *context.network_online.write().unwrap() = true;
 
         // prefetch info from all unfetched mails

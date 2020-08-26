@@ -745,7 +745,7 @@ pub fn interrupt_sentbox_idle(context: &Context) {
 
 
 pub fn perform_smtp_jobs(context: &Context) {
-    info!(context, "perform_smtp_jobs called ...",);
+    info!(context, "SMTP  perform_smtp_jobs called ...",);
     let probe_smtp_network = {
         let &(ref lock, _) = &*context.smtp_state.clone();
         let mut state = lock.lock().unwrap();
@@ -792,21 +792,24 @@ pub fn perform_smtp_idle(context: &Context) {
                     let res = cvar.wait_timeout(state, dur).unwrap();
                     state = res.0;
 
-                    if state.idle || res.1.timed_out() {
+                    if state.idle {
                         // We received the notification and the value has been updated, we can leave.
-                        if state.idle {
-                            info!(context, "SMTP-idle ended by state.idle - cs",);
-                        } else {
-                            info!(context, "SMTP-idle ended by res.1.timed_out() - cs",);
-                        }
+                        info!(context, "SMTP-idle - ended by state.idle - (notification signaled)");
                         break;
+                    }
+                    if res.1.timed_out() {
+                        info!(context, "SMTP-idle - ended by res.1.timed_out()");
+                        if *context.network_online.read().unwrap() == false {
+                            info!(context, "SMTP-idle - return to idle immediately, being offline!");
+                        } else {
+                            break;
+                        }
                     }
                 }
                 state.idle = false;
             }
         }
     }
-    //info!(context, "SMTP-idle ended.",);
 }
 
 fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
@@ -1139,7 +1142,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     //   Maybe this simple doing here is not really correct !!!
                     *context.last_job_success.write().unwrap() = false;
                     
-                    info!(context, "{} job #{}, increase tries", thread, job);
+                    info!(context, "{} job {}, increase tries", thread, job);
                     job.tries + 1
                 }
                 else {
@@ -1155,7 +1158,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if tries < JOB_RETRIES {
                     info!(
                         context,
-                        "{} job #{}, tries now {}", thread, job, tries
+                        "{} job {}, tries now {}", thread, job, tries
                     );
                     job.tries = tries;
                     let time_offset = get_backoff_time_offset(tries);
@@ -1211,9 +1214,9 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                         "{} remove job #{} as it failed with error {:?}", thread, job, err
                     );
                 } else {
-                    info!(context, "{} remove job #{} as it succeeded", thread, job);
+                    info!(context, "{} remove job {} as it succeeded", thread, job);
                     
-                    info!(context, "{} job #{}, setting last_job_success => true", thread, job);
+                    info!(context, "{} job {}, setting last_job_success => true", thread, job);
                     // network state is online when job succeeds
                     *context.last_job_success.write().unwrap() = true;
                 }

@@ -116,6 +116,9 @@ impl JobThread {
                         .map_err(Into::into);
                     let elapsed = start.elapsed().as_millis();
                     info!(context, "{} done in {:.3} ms", prefix, elapsed);
+                    
+                    // after fetching no jobs are needed (idle is possible now)
+                    self.state.0.lock().unwrap().jobs_needed = false;
 
                     res
                 } else {
