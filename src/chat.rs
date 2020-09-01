@@ -2,7 +2,7 @@
 
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, Instant};
 
 use itertools::Itertools;
 use num_traits::FromPrimitive;
@@ -343,7 +343,8 @@ impl ChatId {
             )
             .unwrap_or_default() as usize
     }
-
+    
+    // cs this is the big brake for UI
     pub fn get_fresh_msg_cnt(self, context: &Context) -> usize {
         context
             .sql
@@ -432,7 +433,68 @@ pub struct Chat {
 
 impl Chat {
     /// Loads chat from the database by its ID.
+    /* cs: Das ist die Testfunktion, liefert einen Chat ohne Inhalt
     pub fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self, Error> {
+        //let t1 = Instant::now();
+        // comment start ---
+        let res = context.sql.query_row(
+            "SELECT c.type, c.name, c.grpid, c.param, c.archived,
+                    c.blocked, c.locations_send_until, c.muted_until
+             FROM chats c
+             WHERE c.id=?;",
+            params![chat_id],
+            |row| {
+                let c = Chat {
+                    id: chat_id,
+                    typ: row.get(0)?,
+                    name: row.get::<_, String>(1)?,
+                    grpid: row.get::<_, String>(2)?,
+                    param: row.get::<_, String>(3)?.parse().unwrap_or_default(),
+                    visibility: row.get(4)?,
+                    blocked: row.get::<_, Option<_>>(5)?.unwrap_or_default(),
+                    is_sending_locations: row.get(6)?,
+                    mute_duration: row.get(7)?,
+                };
+                Ok(c)
+            },
+        );
+        // comment end ----
+        // only build an empty chat
+        let res = {
+            let c = Chat {
+                    id: chat_id,
+                    typ: Chattype::Single,
+                    name: format!("{}", chat_id),
+                    grpid: String::from(""),
+                    param: Params::new(),
+                    visibility: ChatVisibility::Normal,
+                    blocked: Blocked::Not,
+                    is_sending_locations: false,
+                    mute_duration: MuteDuration::NotMuted,
+                };
+            Ok(c)
+        };
+
+        match res {
+            Err(err @ crate::sql::Error::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
+                Err(err.into())
+            }
+            Err(err) => {
+                error!(
+                    context,
+                    "chat: failed to load from db {}: {:?}", chat_id, err
+                );
+                Err(err.into())
+            }
+            Ok(mut chat) => {
+                Ok(chat)
+            }
+        }
+    }
+    */
+    
+    pub fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self, Error> {
+        //let t1 = Instant::now();
         let res = context.sql.query_row(
             "SELECT c.type, c.name, c.grpid, c.param, c.archived,
                     c.blocked, c.locations_send_until, c.muted_until
@@ -492,6 +554,7 @@ impl Chat {
                         chat.name = context.stock_str(StockMessage::DeviceMessages).into();
                     }
                 }
+                //info!(context, "chat - load_from_db():  {} ms", t1.elapsed().as_millis());
                 Ok(chat)
             }
         }

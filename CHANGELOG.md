@@ -1,7 +1,12 @@
 # Changelog 
 
+## 1.27.6
+- fix for chatlist stucks #1602
+
+
 ## 1.27.5
 - no "probe_network"
+
 
 ## 1.27.4 (cs)
 - change bad retry algorythm

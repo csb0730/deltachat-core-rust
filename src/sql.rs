@@ -911,7 +911,11 @@ fn open(
             sql.execute("UPDATE chats SET grpid='' WHERE type=100", NO_PARAMS)?;
             sql.set_raw_config_int(context, "dbversion", 63)?;
         }
-
+        // cs
+        info!(context, "[fix for #1602] speed up get_fresh_msg_count()");
+        sql.execute("CREATE INDEX if not exists msgs_multi on msgs (state, hidden, chat_id)", NO_PARAMS)?;
+        
+        
         // (2) updates that require high-level objects
         // (the structure is complete now and all objects are usable)
         // --------------------------------------------------------------------

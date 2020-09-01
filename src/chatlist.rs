@@ -10,6 +10,8 @@ use crate::lot::Lot;
 use crate::message::{Message, MessageState, MsgId};
 use crate::stock::StockMessage;
 
+use std::time::{Duration, Instant};
+
 /// An object representing a single chatlist in memory.
 ///
 /// Chatlist objects contain chat IDs and, if possible, message IDs belonging to them.
@@ -284,14 +286,19 @@ impl Chatlist {
     ///   "No messages".  May be NULL of there is no such text (eg. for the archive link)
     /// - dc_lot_t::timestamp: the timestamp of the message.  0 if not applicable.
     /// - dc_lot_t::state: The state of the message as one of the DC_STATE_* constants (see #dc_msg_get_state()).
-    //    0 if not applicable.
+    ///    0 if not applicable.
     pub fn get_summary(&self, context: &Context, index: usize, chat: Option<&Chat>) -> Lot {
         // The summary is created by the chat, not by the last message.
         // This is because we may want to display drafts here or stuff as
         // "is typing".
         // Also, sth. as "No messages" would not work if the summary comes from a message.
+        
+        //let t1 = Instant::now();
         let mut ret = Lot::new();
-
+        
+        // cs: test, stop here to prevent db access
+        //return ret;
+        
         if index >= self.ids.len() {
             ret.text2 = Some("ErrBadChatlistIndex".to_string());
             return ret;
@@ -330,9 +337,10 @@ impl Chatlist {
         } else {
             ret.fill(&mut lastmsg.unwrap(), chat, lastcontact.as_ref(), context);
         }
-
+        //info!(context, "chatlist - get_summary(): {} ms", t1.elapsed().as_millis());
         ret
     }
+
 
     pub fn get_index_for_id(&self, id: ChatId) -> Option<usize> {
         self.ids.iter().position(|(chat_id, _)| chat_id == &id)
