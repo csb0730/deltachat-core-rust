@@ -91,7 +91,7 @@ impl JobThread {
                 self.imap.trigger_reconnect();
                 if let Err(err) = self.connect_and_fetch(context).await {
                     warn!(context, "connect+fetch failed (2nd try): {}, {}-thread", err, self.name);
-                    info!(context, "setting +++ network_online +++ => false");
+                    info!(context, "setting --- network_online ---   =>  false");
                     *context.network_online.write().unwrap() = false;
                 }
             }

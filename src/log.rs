@@ -8,8 +8,9 @@ macro_rules! info {
     ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
         let formatted = format!($msg, $($args),*);
         let thread = ::std::thread::current();
-        let full = format!("{thid:?} {file}:{line}: {msg}",
-                           thid = thread.id(),
+        // cs add standard width for all items
+        let full = format!("{thid:12} {file:20}:{line:4}: {msg}",
+                           thid = format!("{:12}", format!("{:?}", thread.id())),
                            file = file!(),
                            line = line!(),
                            msg = &formatted);
@@ -25,8 +26,9 @@ macro_rules! warn {
     ($ctx:expr, $msg:expr, $($args:expr),* $(,)?) => {{
         let formatted = format!($msg, $($args),*);
         let thread = ::std::thread::current();
-        let full = format!("{thid:?} {file}:{line}: {msg}",
-                           thid = thread.id(),
+        // cs add standard width for all items
+        let full = format!("{thid:12} {file:20}:{line:4}: {msg}",
+                           thid = format!("{:12}", format!("{:?}", thread.id())),
                            file = file!(),
                            line = line!(),
                            msg = &formatted);

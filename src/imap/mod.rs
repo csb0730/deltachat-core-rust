@@ -615,7 +615,7 @@ impl Imap {
         };
 
         // cs fetch successful => network ok
-        info!(context, "setting +++ network_online +++ => true");
+        info!(context, "setting +++ network_online +++  =>  true");
         *context.network_online.write().unwrap() = true;
 
         // prefetch info from all unfetched mails

@@ -626,10 +626,10 @@ impl MimeMessage {
                                 let dd = dehtml(&decoded_data);
                                 let dd1 = String::from(&decoded_data);
                                 if dd.len() < 1 {
-                                    info!(context, "decoded_data1: {}", dd1);
+                                    info!(context, "decoded_data1 - len < 1: {}", dd1);
                                     dd1
                                 } else {
-                                    info!(context, "decoded_data: {}", dd);
+                                    //info!(context, "decoded_data: {}", dd);
                                     dd
                                 }
                             } else {

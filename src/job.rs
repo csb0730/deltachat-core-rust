@@ -252,7 +252,7 @@ impl Job {
             let loginparam = LoginParam::from_database(context, "configured_");
             if let Err(err) = context.smtp.lock().unwrap().connect(context, &loginparam) {
                 warn!(context, "SMTP connection failure: {:?}", err);
-                info!(context, "setting +++ network_online +++ => false");
+                info!(context, "setting --- network_online ---  =>  false");
                 *context.network_online.write().unwrap() = false;
                 return Status::RetryLater;
             }
@@ -786,9 +786,16 @@ pub fn perform_smtp_idle(context: &Context) {
                 );
             }
             PerformJobsNeeded::Not | PerformJobsNeeded::AvoidDos => {
-                let dur = get_next_wakeup_time(context, Thread::Smtp);
+                let mut dur = get_next_wakeup_time(context, Thread::Smtp);
 
                 loop {
+                    if *context.network_online.read().unwrap() == false {
+                        //cs if we are offline, set default timeout
+                        // when waked up earier, state.idle is signaled
+                        info!(context, "SMTP-idle - being offline! - setting default timeout: 20min");
+                        dur = time::Duration::new(20 * 60, 0); // 10 -> 20 min
+                    }
+
                     let res = cvar.wait_timeout(state, dur).unwrap();
                     state = res.0;
 
@@ -825,9 +832,9 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
     let mut wakeup_time = time::Duration::new(20 * 60, 0); // 10 -> 20 min
     let now = time();
     if t > 0 {
-        info!(context, "get_next_wakeup_time: MIN(desired_timestamp): {}", t);
+        info!(context, "get_next_wakeup_time: desired_time in: {}s", t-now);
         if t > now {
-            wakeup_time = time::Duration::new((t - now) as u64, 0);
+            wakeup_time = time::Duration::new((t-now) as u64, 0);
         } else if *context.network_online.read().unwrap() == true {
             wakeup_time = time::Duration::new(3, 0);
         }
@@ -854,7 +861,7 @@ pub fn maybe_network(context: &Context, status: u32) {
     
     if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
         // cs: prevent double and too quick invocation
-        info!(context, "maybe_network: faster {}s - stopping here", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
+        info!(context, "maybe_network: faster than {}s - stopping here", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
         return;
     }
     *context.last_maybe_network_call.write().unwrap() = now;
@@ -1069,16 +1076,33 @@ pub fn perform_sentbox_jobs(_context: &Context) {
 }
 
 fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
-    info!(context, "{} job_perform: called  - probe_network {}", thread, probe_network);
-    while let Some(mut job) = load_next_job(context, thread, probe_network) {
-        info!(context, "{} job {} loaded - tries {} - action {}", thread, job, job.tries, job.action);
+
+    loop {
         if *context.network_online.read().unwrap() == false {
-            info!(context, "{} job {} - tries {} - stop execution, being offline!", thread, job, job.tries);
+            info!(context, "{} job_perform: - stop execution, being offline!", thread);
             return;
         }
-
-        info!(context, "{} job {} - tries {} - action {} started...", thread, job, job.tries, job.action);
-
+        info!(context, "{} job_perform: probe_network: {}", thread, probe_network);
+        
+        let mut job = match load_next_job(context, thread, probe_network){
+            Some(job) => {
+                info!(context, "{} job_perform: job {} loaded and started - tries {} - action {}", thread, job, job.tries, job.action);
+                job    
+            },
+            _ => {
+                info!(context, "{} job_perform: no job found => no action", thread);
+                break;
+            }
+            
+        };
+        /*
+        if let Some(mut job) = load_next_job(context, thread, probe_network) {
+            info!(context, "{} job {} loaded and started - tries {} - action {}", thread, job, job.tries, job.action);
+        } else {
+            info!(context, "{} job_perform: no job found => no action", thread);
+            break;
+        }
+        */
         // some configuration jobs are "exclusive":
         // - they are always executed in the imap-thread and the smtp-thread is suspended during execution
         // - they may change the database handle; we do not keep old pointers therefore
@@ -1139,7 +1163,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     // cs
                     // Increase tries only if network is there (possibly) and two consecutive tries fail
                     // The delete jobs may fail if message is not at server. Here don't look if job fails 
-                    //   Maybe this simple doing here is not really correct !!!
+                    // => Maybe this simple approach here is not really correct !!!
                     *context.last_job_success.write().unwrap() = false;
                     
                     info!(context, "{} job {}, increase tries", thread, job);
@@ -1147,7 +1171,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 }
                 else {
                     warn!(context,
-                        "{} job #{}, keep tries, net_onl {}, last_job_success {}",
+                        "{} job {}, keep tries, net_onl {}, last_job_success {}",
                         thread,
                         job,
                         net_onl,
@@ -1166,7 +1190,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     job.update(context);
                     info!(
                         context,
-                        "{} job #{}, not succeeded on try {}, retry in {} seconds.",
+                        "{} job {}, not succeeded on try {}, retry in {} seconds.",
                         thread,
                         job.job_id as u32,
                         tries,
@@ -1184,7 +1208,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 } else {
                     info!(
                         context,
-                        "{} remove job #{} as it exhausted {} retries",
+                        "{} remove job {} as it exhausted {} retries",
                         thread,
                         job,
                         JOB_RETRIES
@@ -1211,8 +1235,10 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if let Err(err) = res {
                     warn!(
                         context,
-                        "{} remove job #{} as it failed with error {:?}", thread, job, err
+                        "{} remove job {} as it failed with error {:?}", thread, job, err
                     );
+                    //cs todo don't delete job here
+                    //09-03 17:42:14.002 32352 32379 W DeltaChat: ThreadId(9) src/job.rs:1212: Smtp remove job ##244, action SendMsgToSmtp as it failed with error Message("Permanent SMTP error: Requested action not taken: mailbox unavailable")
                 } else {
                     info!(context, "{} remove job {} as it succeeded", thread, job);
                     
