@@ -31,7 +31,7 @@ use crate::mimefactory::{MimeFactory, RenderedEmail};
 use crate::param::*;
 use crate::sql;
 
-// results in ~3 weeks for the last backoff timespan
+// results in ~3 weeks for the last backoff timespan (cs: original algorithm)
 const JOB_RETRIES: u32 = 17;
 
 // cs
@@ -199,12 +199,12 @@ impl Job {
         match task::block_on(smtp.send(context, recipients, message, job_id)) {
             Err(crate::smtp::send::Error::SendError(err)) => {
                 // Remote error, retry later.
-                warn!(context, "SMTP failed to send: {}", err);
+                warn!(context, "SMTP failed to send: {:?}", err);
                 self.pending_error = Some(err.to_string());
 
                 let res = match err {
                     async_smtp::smtp::error::Error::Permanent(_) => {
-                        Status::Finished(Err(format_err!("Permanent SMTP error: {}", err)))
+                        Status::Finished(Err(format_err!("Permanent SMTP error: {:?}", err)))
                     }
                     async_smtp::smtp::error::Error::Transient(_) => {
                         // We got a transient 4xx response from SMTP server.
@@ -229,7 +229,7 @@ impl Job {
             Err(crate::smtp::send::Error::EnvelopeError(err)) => {
                 // Local error, job is invalid, do not retry.
                 smtp.disconnect();
-                warn!(context, "SMTP job is invalid: {}", err);
+                warn!(context, "SMTP job is invalid: {:?}", err);
                 Status::Finished(Err(Error::SmtpError(err)))
             }
             Err(crate::smtp::send::Error::NoTransport) => {
@@ -556,7 +556,7 @@ impl Job {
                     && context.get_config_bool(Config::MdnsEnabled)
                 {
                     if let Err(err) = send_mdn(context, &msg) {
-                        warn!(context, "could not send out mdn for {}: {}", msg.id, err);
+                        warn!(context, "could not send out mdn for {}: {:?}", msg.id, err);
                         return Status::Finished(Err(err));
                     }
                 }
@@ -692,7 +692,7 @@ pub fn interrupt_inbox_idle(context: &Context) {
         }
         Err(err) => {
             *context.perform_inbox_jobs_needed.write().unwrap() = true;
-            warn!(context, "interrupt_inbox_idle: could not interrupt idle: {}, flag it to check jobs only", err);
+            warn!(context, "interrupt_inbox_idle: could not interrupt idle: {:?}, flag it to check jobs only", err);
         }
     }
 }
@@ -719,7 +719,7 @@ pub fn interrupt_inbox_idle_2(context: &Context) {
         }
         Err(err) => {
             *context.perform_inbox_jobs_needed.write().unwrap() = true;
-            warn!(context, "could not interrupt idle: {}, flag it to check jobs only", err);
+            warn!(context, "could not interrupt idle: {:?}, flag it to check jobs only", err);
         }
     }
 }
@@ -921,7 +921,7 @@ pub fn job_send_msg(context: &Context, msg_id: MsgId) -> Result<()> {
     let attach_selfavatar = match chat::shall_attach_selfavatar(context, msg.chat_id) {
         Ok(attach_selfavatar) => attach_selfavatar,
         Err(err) => {
-            warn!(context, "job: cannot get selfavatar-state: {}", err);
+            warn!(context, "job: cannot get selfavatar-state: {:?}", err);
             false
         }
     };
@@ -1061,7 +1061,7 @@ pub fn perform_inbox_jobs(context: &Context) {
     *context.perform_inbox_jobs_needed.write().unwrap() = false;
 
     if let Err(err) = add_imap_deletion_jobs(context) {
-        warn!(context, "Can't add IMAP message deletion jobs: {}", err);
+        warn!(context, "Can't add IMAP message deletion jobs: {:?}", err);
     }
     job_perform(context, Thread::Imap, probe_imap_network);
     //info!(context, "perform_inbox_jobs ended.",);
@@ -1082,7 +1082,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
             info!(context, "{} job_perform: - stop execution, being offline!", thread);
             return;
         }
-        info!(context, "{} job_perform: probe_network: {}", thread, probe_network);
+        //info!(context, "{} job_perform: probe_network: {}", thread, probe_network);
         
         let mut job = match load_next_job(context, thread, probe_network){
             Some(job) => {
@@ -1275,7 +1275,7 @@ fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, trie
         Action::ImexImap => match JobImexImap(context, &job) {
             Ok(()) => Status::Finished(Ok(())),
             Err(err) => {
-                error!(context, "{}", err);
+                error!(context, "{:?}", err);
                 Status::Finished(Err(err))
             }
         },

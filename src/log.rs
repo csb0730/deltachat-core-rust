@@ -9,7 +9,7 @@ macro_rules! info {
         let formatted = format!($msg, $($args),*);
         let thread = ::std::thread::current();
         // cs add standard width for all items
-        let full = format!("{thid:12} {file:20}:{line:4}: {msg}",
+        let full = format!("{thid:12} {file:21}:{line:4}: {msg}",
                            thid = format!("{:12}", format!("{:?}", thread.id())),
                            file = file!(),
                            line = line!(),
@@ -27,7 +27,7 @@ macro_rules! warn {
         let formatted = format!($msg, $($args),*);
         let thread = ::std::thread::current();
         // cs add standard width for all items
-        let full = format!("{thid:12} {file:20}:{line:4}: {msg}",
+        let full = format!("{thid:12} {file:21}:{line:4}: {msg}",
                            thid = format!("{:12}", format!("{:?}", thread.id())),
                            file = file!(),
                            line = line!(),
