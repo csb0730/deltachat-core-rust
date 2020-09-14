@@ -87,12 +87,13 @@ impl JobThread {
 
         if use_network {
             if let Err(err) = self.connect_and_fetch(context).await {
-                warn!(context, "connect+fetch failed: {}, reconnect & retry {}-thread", err, self.name);
+                warn!(context, "connect+fetch failed: {:?}, reconnect & retry {}-thread", err, self.name);
                 self.imap.trigger_reconnect();
                 if let Err(err) = self.connect_and_fetch(context).await {
-                    warn!(context, "connect+fetch failed (2nd try): {}, {}-thread", err, self.name);
-                    info!(context, "setting --- network_online ---   =>  false");
-                    *context.network_online.write().unwrap() = false;
+                    warn!(context, "connect+fetch failed (2nd try): {:?}, {}-thread", err, self.name);
+                    //info!(context, "setting --- network_online ---   =>  false");
+                    //*context.network_online.write().unwrap() = false;
+                    context.set_network_online_status(false);
                 }
             }
         }
@@ -104,8 +105,9 @@ impl JobThread {
         let prefix = format!("{}-fetch", self.name);
         match self.imap.connect_configured(context) {
             Ok(()) => {
-                info!(context, "setting +++ network_online +++ => true");
-                *context.network_online.write().unwrap() = true;
+                //info!(context, "setting +++ network_online +++ => true");
+                //*context.network_online.write().unwrap() = true;
+                context.set_network_online_status(true);
                 if let Some(watch_folder) = self.get_watch_folder(context) {
                     let start = std::time::Instant::now();
                     info!(context, "{} started...", prefix);

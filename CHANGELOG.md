@@ -1,10 +1,13 @@
 # Changelog 
 
+## 1.27.7
+- dehtml: handle empty tags #1810
+
 ## 1.27.6
-- fix for chatlist stucks #1602
+- fix for chatlist stucks #1602 (db index)
 
 
-## 1.27.5
+## 1.27.5 (cs)
 - no "probe_network"
 
 
@@ -54,7 +57,7 @@ ok  6. don't do any action when offline
     => a: async_std::stream::interval  60 -> 300 (idle.rs)
     more logging
     
-## 1.27.1 (cs)
+## 1.27.1 (cs from here)
 
 - backup2
 
@@ -63,7 +66,7 @@ ok  6. don't do any action when offline
 - xxx
 
 
-## 1.27.0
+## 1.27.0 (original dc master)
 
 - handle keys reliably on armv7 #1327
 

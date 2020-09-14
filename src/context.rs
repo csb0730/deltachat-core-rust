@@ -158,6 +158,20 @@ impl Context {
         Ok(ctx)
     }
 
+    /// cs set and log network status
+    pub fn set_network_online_status(&self, new_status: bool) {
+        if *self.network_online.read().unwrap() != new_status {
+            if new_status {
+                info!(self, "+++ network_online +++ set to => true");
+            } else {
+                info!(self, "--- network_online --- set to => false");
+            };
+            *self.network_online.write().unwrap() = new_status;
+        } else {
+            info!(self, "=== network_online === is => {}", new_status);
+        };
+    }
+
     /// Returns database file path.
     pub fn get_dbfile(&self) -> &Path {
         self.dbfile.as_path()

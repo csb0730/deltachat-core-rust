@@ -615,8 +615,9 @@ impl Imap {
         };
 
         // cs fetch successful => network ok
-        info!(context, "setting +++ network_online +++  =>  true");
-        *context.network_online.write().unwrap() = true;
+        //info!(context, "setting +++ network_online +++  =>  true");
+        //*context.network_online.write().unwrap() = true;
+        context.set_network_online_status(true);
 
         // prefetch info from all unfetched mails
         let mut new_last_seen_uid = last_seen_uid;

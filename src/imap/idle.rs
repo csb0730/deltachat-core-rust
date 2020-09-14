@@ -79,6 +79,7 @@ impl Imap {
 
             let session = self.session.lock().await.take();
             let timeout = Duration::from_secs(23 * 60);
+            
             if let Some(session) = session {
                 match session.idle() {
                     // BEWARE: If you change the Secure branch you
@@ -88,13 +89,13 @@ impl Imap {
                             return Err(Error::IdleProtocolFailed(err));
                         }
 
-                        info!(context, "Idle wait (Secure) - timeout set to {:?} s", timeout); // cs
+                        info!(context, "Idle wait (Secure) - timeout set to {:?}", timeout); // cs
                         let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
                         *self.interrupt.lock().await = Some(interrupt);
 
                         if self.skip_next_idle_wait.load(Ordering::SeqCst) {
-                            // interrupt_idle has happened before we
-                            // provided self.interrupt
+                            // interrupt_idle has happened before
+                            // we provided self.interrupt
                             self.skip_next_idle_wait.store(false, Ordering::SeqCst);
                             std::mem::drop(idle_wait);
                             info!(context, "Idle wait - was skipped");
@@ -111,7 +112,7 @@ impl Imap {
                                     info!(context, "Idle wait - timeout or interruption");
                                 }
                                 Ok(IdleResponse::ManualInterrupt) => {
-                                    info!(context, "Idle wait - was interrupted - manual");
+                                    info!(context, "Idle wait - interrupted manually");
                                 }
                                 Err(err) => {
                                     warn!(context, "Idle wait - error: {:?}", err);
@@ -225,7 +226,7 @@ impl Imap {
                 // interrupt_idle has happened before we
                 // provided self.interrupt
                 self.skip_next_idle_wait.store(false, Ordering::SeqCst);
-                info!(context, "fake-idle wait was skipped");
+                info!(context, "fake_idle: wait was skipped");
             } else {
                 // loop until we are interrupted or if we fetched something
                 while let Some(_) = interrupt_interval.next().await {
@@ -240,7 +241,7 @@ impl Imap {
                         // we only fake-idled because network was gone during IDLE, probably
                         break;
                     }
-                    info!(context, "fake_idle is connected");
+                    info!(context, "fake_idle: is connected");
                     // we are connected, let's see if fetching messages results
                     // in anything.  If so, we behave as if IDLE had data but
                     // will have already fetched the messages so perform_*_fetch
@@ -255,7 +256,7 @@ impl Imap {
                                 }
                             }
                             Err(err) => {
-                                error!(context, "could not fetch from folder: {}", err);
+                                error!(context, "could not fetch from folder: {:?}", err);
                                 self.trigger_reconnect()
                             }
                         }
@@ -266,7 +267,7 @@ impl Imap {
 
             info!(
                 context,
-                "IMAP-fake-IDLE done after {:.4}s",
+                "IMAP-fake-IDLE done after {:.3}s",
                 SystemTime::now()
                     .duration_since(fake_idle_start_time)
                     .unwrap_or_default()

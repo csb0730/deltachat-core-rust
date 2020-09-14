@@ -10,7 +10,7 @@ use crate::lot::Lot;
 use crate::message::{Message, MessageState, MsgId};
 use crate::stock::StockMessage;
 
-use std::time::{Duration, Instant};
+//use std::time::{Duration, Instant};
 
 /// An object representing a single chatlist in memory.
 ///

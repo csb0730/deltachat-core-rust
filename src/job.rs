@@ -252,8 +252,9 @@ impl Job {
             let loginparam = LoginParam::from_database(context, "configured_");
             if let Err(err) = context.smtp.lock().unwrap().connect(context, &loginparam) {
                 warn!(context, "SMTP connection failure: {:?}", err);
-                info!(context, "setting --- network_online ---  =>  false");
-                *context.network_online.write().unwrap() = false;
+                //info!(context, "setting --- network_online ---  =>  false");
+                //*context.network_online.write().unwrap() = false;
+                context.set_network_online_status(false);
                 return Status::RetryLater;
             }
         }
@@ -627,7 +628,11 @@ pub fn perform_sentbox_fetch(context: &Context) {
 }
 
 pub fn perform_inbox_idle(context: &Context) {
-    if *context.perform_inbox_jobs_needed.clone().read().unwrap() {
+
+    let jobs_needed    = *context.perform_inbox_jobs_needed.clone().read().unwrap();
+    let network_online = *context.network_online.read().unwrap();
+
+    if jobs_needed && network_online {
         info!(
             context,
             "INBOX-IDLE will not be started because of waiting jobs."
@@ -640,7 +645,7 @@ pub fn perform_inbox_idle(context: &Context) {
         .inbox_thread
         .read()
         .unwrap()
-        .idle(context, use_network);
+        .idle(context, use_network); //JobThread::idle
 }
 
 pub fn perform_mvbox_idle(context: &Context) {
@@ -704,8 +709,9 @@ pub fn interrupt_inbox_idle_2(context: &Context) {
     // If it's currently fetching then we can not get the lock
     // but we flag it for checking jobs so that idle will be skipped.
     
-    // cs: this is the old function without check of timing
-    //     it is not called by FetchWorker.doWork()
+    // cs
+    // This is the old function without check of timing
+    // It is **not** called by FetchWorker.doWork()
 
     if *context.network_online.read().unwrap() == false {
         info!(context, "interrupt_inbox_idle_2: stop execution, being offline!");
@@ -719,7 +725,7 @@ pub fn interrupt_inbox_idle_2(context: &Context) {
         }
         Err(err) => {
             *context.perform_inbox_jobs_needed.write().unwrap() = true;
-            warn!(context, "could not interrupt idle: {:?}, flag it to check jobs only", err);
+            warn!(context, "interrupt_inbox_idle_2: could not interrupt idle: {:?}, flag it to check jobs only", err);
         }
     }
 }
@@ -745,7 +751,7 @@ pub fn interrupt_sentbox_idle(context: &Context) {
 
 
 pub fn perform_smtp_jobs(context: &Context) {
-    info!(context, "SMTP  perform_smtp_jobs called ...",);
+    info!(context, "SMTP perform_smtp_jobs called ...",);
     let probe_smtp_network = {
         let &(ref lock, _) = &*context.smtp_state.clone();
         let mut state = lock.lock().unwrap();
@@ -847,13 +853,15 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
 pub fn maybe_network(context: &Context, status: u32) {
 
     if status == 0 {
-        *context.network_online.write().unwrap() = false;
+        //*context.network_online.write().unwrap() = false;
         info!(context, "maybe_network: call - offline - stopping here");
+        context.set_network_online_status(false);
         return;
     }
     else {
-        *context.network_online.write().unwrap() = true;
+        //*context.network_online.write().unwrap() = true;
         info!(context, "maybe_network: call - online - go ...");
+        context.set_network_online_status(true);
     }
     
     
@@ -1050,11 +1058,11 @@ fn add_imap_deletion_jobs(context: &Context) -> sql::Result<()> {
 }
 
 pub fn perform_inbox_jobs(context: &Context) {
-    info!(context, "perform_inbox_jobs: called",);
     if *context.network_online.read().unwrap() == false {
         info!(context, "perform_inbox_jobs: stop execution, being offline!",);
         return;
     };
+    info!(context, "perform_inbox_jobs: go ...",);
 
     let probe_imap_network = *context.probe_imap_network.clone().read().unwrap();
     *context.probe_imap_network.write().unwrap() = false;
@@ -1064,7 +1072,6 @@ pub fn perform_inbox_jobs(context: &Context) {
         warn!(context, "Can't add IMAP message deletion jobs: {:?}", err);
     }
     job_perform(context, Thread::Imap, probe_imap_network);
-    //info!(context, "perform_inbox_jobs ended.",);
 }
 
 pub fn perform_mvbox_jobs(_context: &Context) {
