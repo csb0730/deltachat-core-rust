@@ -1,5 +1,9 @@
 # Changelog 
 
+## 1.27.8
+- Experimental Broadcast groups
+  (add #BCC to the name of group for using)
+
 ## 1.27.7
 - dehtml: handle empty tags #1810
 
