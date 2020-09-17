@@ -444,10 +444,12 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
         let e2ee_guaranteed = self.is_e2ee_guaranteed();
         let mut encrypt_helper = EncryptHelper::new(self.context)?;
 
-        let mut subject = encode_words(&subject_str);
-        if subject.ends_with("#BCC") {
-            subject.truncate(subject.len()-4);
+        // strip suffix before encoding!
+        let mut temp = subject_str.to_string();
+        if temp.ends_with("#BCC") {
+            temp.truncate(temp.len()-4);
         }
+        let subject = encode_words(&temp);
         info!(self.context, "MimeFactory::render: subject: {}", subject);
         
         let mut message = match self.loaded {
