@@ -78,7 +78,7 @@ impl Imap {
             self.select_folder(context, watch_folder.clone()).await?;
 
             let session = self.session.lock().await.take();
-            let timeout = Duration::from_secs(23 * 60);
+            let timeout = Duration::from_secs(13 * 60); // cs 23 * 60 => 13 * 60 for test
             
             if let Some(session) = session {
                 match session.idle() {

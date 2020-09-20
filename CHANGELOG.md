@@ -1,33 +1,41 @@
 # Changelog 
 
 ## 1.27.8
+
 - Experimental Broadcast groups
   (add #BCC to the name of group for using)
 
+
 ## 1.27.7
+
 - dehtml: handle empty tags #1810
 
+
 ## 1.27.6
-- fix for chatlist stucks #1602 (db index)
+
+- fix for stucking chatlist #1602 (add new db index)
 
 
-## 1.27.5 (cs)
-- no "probe_network"
+## 1.27.5
+
+- "probe_network" flag disabled
 
 
-## 1.27.4 (cs)
-- change bad retry algorythm
-- don't start any job action when offline
-- introduce network_online status
-    set it by several conditions and device status
-- increase retry counter only when two consecutive jobs are failing
+## 1.27.4
+
+- introduce "network_online" status flag in context
+    (set it by several conditions AND device status)
+
+- don't start any job action when being offline
+
+- increase job retry counter only when two consecutive jobs are failing (!)
 
 
-## 1.27.3 (cs)
+## 1.27.3
 
-- change bad retry algorithm (similar version of 0.200. c-core with network state)
+- change bad retry algorithm (similar to version of 0.200 (my individual c-core with network state))
 
-ok  1. better calculation of next retry time
+ok  1. better calculation of next retry time (no stochastic calculation)
 
 ok  2. need extension of dc_maybe_network() with connection parameter.
         0 = disconnected or unknown
@@ -45,10 +53,12 @@ ok  5. introduce connection status (network_online) in context
 ok  6. don't do any action when offline
         ok  maybe_network() call
         other?
+        
+(ok == done)
+(from here: git branch "lesser_battery_drain")
 
 
-
-## 1.27.2 (cs)
+## 1.27.2
 
 - battery drain is more than twice from c-core
     a) imap timeout is coming in an interval of approx 14min not 23min!
@@ -60,14 +70,15 @@ ok  6. don't do any action when offline
     => b: prevent double invocation of maybe_network() (job.rs, context.rs)
     => a: async_std::stream::interval  60 -> 300 (idle.rs)
     more logging
-    
+
+
 ## 1.27.1 (cs from here)
 
-- backup2
+- backup2 (export backup file format is "sqlar"; import is possible for both)
 
 - add MIME 1.0 header
 
-- xxx
+- and more ...
 
 
 ## 1.27.0 (original dc master)
