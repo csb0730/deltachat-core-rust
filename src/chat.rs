@@ -430,70 +430,11 @@ pub struct Chat {
     pub param: Params,
     is_sending_locations: bool,
     pub mute_duration: MuteDuration,
+    pub bcc_group: bool,
 }
 
 impl Chat {
     /// Loads chat from the database by its ID.
-    /* cs: Das ist die Testfunktion, liefert einen Chat ohne Inhalt
-    pub fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self, Error> {
-        //let t1 = Instant::now();
-        // comment start ---
-        let res = context.sql.query_row(
-            "SELECT c.type, c.name, c.grpid, c.param, c.archived,
-                    c.blocked, c.locations_send_until, c.muted_until
-             FROM chats c
-             WHERE c.id=?;",
-            params![chat_id],
-            |row| {
-                let c = Chat {
-                    id: chat_id,
-                    typ: row.get(0)?,
-                    name: row.get::<_, String>(1)?,
-                    grpid: row.get::<_, String>(2)?,
-                    param: row.get::<_, String>(3)?.parse().unwrap_or_default(),
-                    visibility: row.get(4)?,
-                    blocked: row.get::<_, Option<_>>(5)?.unwrap_or_default(),
-                    is_sending_locations: row.get(6)?,
-                    mute_duration: row.get(7)?,
-                };
-                Ok(c)
-            },
-        );
-        // comment end ----
-        // only build an empty chat
-        let res = {
-            let c = Chat {
-                    id: chat_id,
-                    typ: Chattype::Single,
-                    name: format!("{}", chat_id),
-                    grpid: String::from(""),
-                    param: Params::new(),
-                    visibility: ChatVisibility::Normal,
-                    blocked: Blocked::Not,
-                    is_sending_locations: false,
-                    mute_duration: MuteDuration::NotMuted,
-                };
-            Ok(c)
-        };
-
-        match res {
-            Err(err @ crate::sql::Error::Sql(rusqlite::Error::QueryReturnedNoRows)) => {
-                Err(err.into())
-            }
-            Err(err) => {
-                error!(
-                    context,
-                    "chat: failed to load from db {}: {:?}", chat_id, err
-                );
-                Err(err.into())
-            }
-            Ok(mut chat) => {
-                Ok(chat)
-            }
-        }
-    }
-    */
-    
     pub fn load_from_db(context: &Context, chat_id: ChatId) -> Result<Self, Error> {
         //let t1 = Instant::now();
         let res = context.sql.query_row(
@@ -513,6 +454,7 @@ impl Chat {
                     blocked: row.get::<_, Option<_>>(5)?.unwrap_or_default(),
                     is_sending_locations: row.get(6)?,
                     mute_duration: row.get(7)?,
+                    bcc_group: false,
                 };
                 Ok(c)
             },
@@ -554,6 +496,7 @@ impl Chat {
                     } else if chat.param.exists(Param::Devicetalk) {
                         chat.name = context.stock_str(StockMessage::DeviceMessages).into();
                     }
+                    chat.bcc_group = chat.typ == Chattype::Group && chat.name.ends_with("#BCC");
                 }
                 //info!(context, "chat - load_from_db():  {} ms", t1.elapsed().as_millis());
                 Ok(chat)
@@ -796,7 +739,10 @@ impl Chat {
         if let Some(from) = context.get_config(Config::ConfiguredAddr) {
             let new_rfc724_mid = {
                 let grpid = match self.typ {
-                    Chattype::Group | Chattype::VerifiedGroup => Some(self.grpid.as_str()),
+                    // bcc_groups do not get a group id because for the receiver it doesn't look like a group
+                    Chattype::Group | Chattype::VerifiedGroup if !self.bcc_group => {
+                        Some(self.grpid.as_str())
+                    }
                     _ => None,
                 };
                 dc_create_outgoing_rfc724_mid(grpid, &from)
@@ -1796,7 +1742,8 @@ pub fn create_group_chat(
     let row_id = sql::get_rowid(context, &context.sql, "chats", "grpid", grpid);
     let chat_id = ChatId::new(row_id);
     if !chat_id.is_error() {
-        if add_to_chat_contacts_table(context, chat_id, DC_CONTACT_ID_SELF) {
+        let bcc_group = chat_name.as_ref().ends_with("#BCC");
+        if add_to_chat_contacts_table(context, chat_id, DC_CONTACT_ID_SELF) && !bcc_group {
             let mut draft_msg = Message::new(Viewtype::Text);
             draft_msg.set_text(Some(draft_txt));
             chat_id.set_draft_raw(context, &mut draft_msg);
@@ -1923,7 +1870,7 @@ pub(crate) fn add_contact_to_chat_ex(
             return Ok(false);
         }
     }
-    if chat.param.get_int(Param::Unpromoted).unwrap_or_default() == 0 {
+    if chat.param.get_int(Param::Unpromoted).unwrap_or_default() == 0 && !chat.bcc_group {
         msg.viewtype = Viewtype::Text;
         msg.text = Some(context.stock_system_msg(
             StockMessage::MsgAddMember,
@@ -2127,7 +2074,7 @@ pub fn remove_contact_from_chat(
             } else {
                 /* we should respect this - whatever we send to the group, it gets discarded anyway! */
                 if let Ok(contact) = Contact::get_by_id(context, contact_id) {
-                    if chat.is_promoted() {
+                    if chat.is_promoted() && !chat.bcc_group {
                         msg.viewtype = Viewtype::Text;
                         if contact.id == DC_CONTACT_ID_SELF {
                             set_group_explicitly_left(context, chat.grpid)?;
@@ -2227,7 +2174,7 @@ pub fn set_chat_name(
             )
             .is_ok()
             {
-                if chat.is_promoted() {
+                if chat.is_promoted() && !chat.bcc_group {
                     msg.viewtype = Viewtype::Text;
                     msg.text = Some(context.stock_system_msg(
                         StockMessage::MsgGrpName,

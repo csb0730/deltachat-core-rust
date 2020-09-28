@@ -73,7 +73,7 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
     ) -> Result<MimeFactory<'a, 'b>, Error> {
         let chat = Chat::load_from_db(context, msg.chat_id)?;
 
-        let bcc_group: bool = chat.name.ends_with("#BCC");
+        let bcc_group: bool = chat.bcc_group;
 
         let from_addr = context
             .get_config(Config::ConfiguredAddr)
@@ -322,7 +322,7 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
     }
 
     fn subject_str(&self) -> String {
-        match self.loaded {
+        let mut subj_str = match self.loaded {
             Loaded::Message { ref chat } => {
                 if self.msg.param.get_cmd() == SystemMessage::AutocryptSetupMessage {
                     self.context
@@ -348,7 +348,11 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
                 }
             }
             Loaded::MDN { .. } => self.context.stock_str(StockMessage::ReadRcpt).into_owned(),
+        };
+        if subj_str.ends_with("#BCC") {
+            subj_str.truncate(subj_str.len() - 4);
         }
+        subj_str
     }
 
     pub fn recipients(&self) -> Vec<String> {
@@ -383,6 +387,10 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
                     addr.clone(),
                 ));
             }
+        }
+        
+        if to.is_empty() {
+            to.push(from.clone());
         }
         
         // Fix for #1575, #1576
@@ -444,12 +452,19 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
         let e2ee_guaranteed = self.is_e2ee_guaranteed();
         let mut encrypt_helper = EncryptHelper::new(self.context)?;
 
-        // strip suffix before encoding!
-        let mut temp = subject_str.to_string();
-        if temp.ends_with("#BCC") {
-            temp.truncate(temp.len()-4);
-        }
-        let subject = encode_words(&temp);
+        //let subject = encode_words(&subject_str);
+
+        let subject = if subject_str
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == ' ')
+        // We do not use needs_encoding() here because needs_encoding() returns true if the string contains a space
+        // but we do not want to encode all subjects just because they contain a space.
+        {
+            subject_str
+        } else {
+            encode_words(&subject_str)
+        };
+        
         info!(self.context, "MimeFactory::render: subject: {}", subject);
         
         let mut message = match self.loaded {
@@ -495,7 +510,10 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
             //unprotected_headers.push(Header::new_with_value("Bcc".into(), to).unwrap());
             
             // this is what Thunderbird does when no "To:" header is there
-            unprotected_headers.push(Header::new("To".into(), "Hidden_receipients: ;".to_string()));
+            unprotected_headers.push(Header::new(
+                "To".into(),
+                "Hidden_receipients: ;".to_string(),
+            ));
         } else {
             unprotected_headers.push(Header::new_with_value("To".into(), to).unwrap());
         }

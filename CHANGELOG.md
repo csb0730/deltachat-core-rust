@@ -4,6 +4,8 @@
 
 - Experimental Broadcast groups
   (add #BCC to the name of group for using)
+  Include changes from official pr.
+
 
 
 ## 1.27.7
