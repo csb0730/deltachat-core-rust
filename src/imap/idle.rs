@@ -78,7 +78,7 @@ impl Imap {
             self.select_folder(context, watch_folder.clone()).await?;
 
             let session = self.session.lock().await.take();
-            let timeout = Duration::from_secs(13 * 60); // cs 23 * 60 => 13 * 60 for test
+            let timeout = Duration::from_secs(7 * 60); // cs 23 * 60 => 7 * 60 for test
             
             if let Some(session) = session {
                 match session.idle() {
@@ -109,7 +109,7 @@ impl Imap {
                                 // from Timeouts if we would know it's a Timeout we could bail
                                 // directly and reconnect .
                                 Ok(IdleResponse::Timeout) => {
-                                    info!(context, "Idle wait - timeout or interruption");
+                                    info!(context, "Idle wait - timeout");
                                 }
                                 Ok(IdleResponse::ManualInterrupt) => {
                                     info!(context, "Idle wait - interrupted manually");
@@ -167,10 +167,10 @@ impl Imap {
                                 // from Timeouts if we would know it's a Timeout we could bail
                                 // directly and reconnect .
                                 Ok(IdleResponse::Timeout) => {
-                                    info!(context, "Is Idle wait - timeout or interruption");
+                                    info!(context, "Is Idle wait - timeout");
                                 }
                                 Ok(IdleResponse::ManualInterrupt) => {
-                                    info!(context, "Is Idle wait - was interrupted - manual");
+                                    info!(context, "Is Idle wait - interrupted manually");
                                 }
                                 Err(err) => {
                                     warn!(context, "Is Idle wait - error: {:?}", err);
