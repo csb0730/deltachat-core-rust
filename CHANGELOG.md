@@ -2,6 +2,9 @@
 
 ## 1.27.8
 
+- Split IMAP idle timeout to many small intervals
+  and limit timeout by timer to 23 mins.
+
 - Experimental Broadcast groups
   (add #BCC to the name of group for using)
   Include changes from official pr.

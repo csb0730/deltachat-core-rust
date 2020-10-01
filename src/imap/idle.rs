@@ -78,8 +78,12 @@ impl Imap {
             self.select_folder(context, watch_folder.clone()).await?;
 
             let session = self.session.lock().await.take();
-            let timeout = Duration::from_secs(7 * 60); // cs 23 * 60 => 7 * 60 for test
+            let timeout = Duration::from_secs(5); // cs: 23 * 60 => 7 * 60 for testing => 5
             
+            let timeout_start = SystemTime::now();
+            let max_loop = 276; // 23 min = 1380 s / 5s = 276
+            let max_dur  = 23 * 60; // limit max duration, loop counter not reliable
+
             if let Some(session) = session {
                 match session.idle() {
                     // BEWARE: If you change the Secure branch you
@@ -88,34 +92,48 @@ impl Imap {
                         if let Err(err) = handle.init().await {
                             return Err(Error::IdleProtocolFailed(err));
                         }
-
-                        info!(context, "Idle wait (Secure) - timeout set to {:?}", timeout); // cs
-                        let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
-                        *self.interrupt.lock().await = Some(interrupt);
-
-                        if self.skip_next_idle_wait.load(Ordering::SeqCst) {
-                            // interrupt_idle has happened before
-                            // we provided self.interrupt
-                            self.skip_next_idle_wait.store(false, Ordering::SeqCst);
-                            std::mem::drop(idle_wait);
-                            info!(context, "Idle wait - was skipped");
-                        } else {
-                            info!(context, "Idle wait - entering wait-on-remote state");
-                            match idle_wait.await {
-                                Ok(IdleResponse::NewData(_)) => {
-                                    info!(context, "Idle wait - has NewData");
+                        info!(context, "Idle wait (Secure) - timeout set to {} * {:?}", max_loop, timeout); // cs
+                        let mut n = 0;
+                        loop {
+                            n += 1;
+                            let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
+                            *self.interrupt.lock().await = Some(interrupt);
+                            if self.skip_next_idle_wait.load(Ordering::SeqCst) {
+                                // interrupt_idle has happened before
+                                // we provided self.interrupt
+                                self.skip_next_idle_wait.store(false, Ordering::SeqCst);
+                                std::mem::drop(idle_wait);
+                                info!(context, "Idle wait - was skipped");
+                                break;
+                            } else {
+                                if n == 1 {
+                                    info!(context, "Idle wait - entering wait-on-remote state");
                                 }
-                                // TODO: idle_wait does not distinguish manual interrupts
-                                // from Timeouts if we would know it's a Timeout we could bail
-                                // directly and reconnect .
-                                Ok(IdleResponse::Timeout) => {
-                                    info!(context, "Idle wait - timeout");
-                                }
-                                Ok(IdleResponse::ManualInterrupt) => {
-                                    info!(context, "Idle wait - interrupted manually");
-                                }
-                                Err(err) => {
-                                    warn!(context, "Idle wait - error: {:?}", err);
+                                match idle_wait.await {
+                                    Ok(IdleResponse::NewData(x)) => {
+                                        info!(context, "Idle wait - has NewData {:?}", x);
+                                        break;
+                                    }
+                                    // TODO: idle_wait does not distinguish manual interrupts
+                                    // from Timeouts if we would know it's a Timeout we could bail
+                                    // directly and reconnect .
+                                    Ok(IdleResponse::Timeout) => {
+                                        let timeout_dur = timeout_start.elapsed().unwrap_or_default().as_secs();
+                                        if n > max_loop || timeout_dur > max_dur {
+                                            info!(context, "Idle wait - timeout end reached, n: {}, secs: {}", n, timeout_dur);
+                                            break;
+                                        } else {
+                                            info!(context, "Idle wait - timeout, n: {}, secs: {}", n, timeout_dur);
+                                        }
+                                    }
+                                    Ok(IdleResponse::ManualInterrupt) => {
+                                        info!(context, "Idle wait - interrupted manually");
+                                        break;
+                                    }
+                                    Err(err) => {
+                                        warn!(context, "Idle wait - error: {:?}", err);
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -125,6 +143,7 @@ impl Imap {
                             async_std::future::timeout(Duration::from_secs(15), handle.done())
                                 .await
                                 .map_err(|err| {
+                                    info!(context, "Idle wait - triggering reconnect");
                                     self.trigger_reconnect();
                                     Error::IdleTimeout(err)
                                 })?;
@@ -137,6 +156,7 @@ impl Imap {
                                 // if we cannot terminate IDLE it probably
                                 // means that we waited long (with idle_wait)
                                 // but the network went away/changed
+                                info!(context, "Idle wait - triggering reconnect");
                                 self.trigger_reconnect();
                                 return Err(Error::IdleProtocolFailed(err));
                             }
