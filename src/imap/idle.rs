@@ -15,6 +15,12 @@ use super::session::Session;
 
 type Result<T> = std::result::Result<T, Error>;
 
+// for idle timeout handling
+const     MAX_LOOP: i32             = 240;     // 20 min = 1200 s / 5s = 240
+const     MAX_IDLE_DUR_LONG: u64    = 21 * 60; // limit max duration to 23 min, loop counter not reliable
+const     MAX_IDLE_DUR_SHORT: u64   = 11 * 60;
+
+
 #[derive(Debug, Fail)]
 pub enum Error {
     #[fail(display = "IMAP IDLE protocol failed to init/complete")]
@@ -61,6 +67,13 @@ impl Session {
 }
 
 impl Imap {
+    
+    pub async fn init_idle_timeout(&self) {
+        if *self.max_timeout_duration.read().await == 0 {
+            *self.max_timeout_duration.write().await = MAX_IDLE_DUR_LONG;
+        }
+    }
+    
     pub fn can_idle(&self) -> bool {
         task::block_on(async move { self.config.read().await.can_idle })
     }
@@ -76,13 +89,14 @@ impl Imap {
                 .map_err(Error::SetupHandleError)?;
 
             self.select_folder(context, watch_folder.clone()).await?;
+            self.init_idle_timeout().await;
 
-            let session = self.session.lock().await.take();
-            let timeout = Duration::from_secs(5); // cs: 23 * 60 => 7 * 60 for testing => 5
-            
-            let timeout_start = SystemTime::now();
-            let max_loop = 276; // 23 min = 1380 s / 5s = 276
-            let max_dur  = 23 * 60; // limit max duration, loop counter not reliable
+            let session             = self.session.lock().await.take();
+            let timeout_data         = Duration::from_secs(5); // cs: 23 * 60 => 7 * 60 for testing => 5
+            let timeout_start        = SystemTime::now();
+            let max_timeout_duration = *self.max_timeout_duration.read().await;
+            let mut timeout_last_dur = 0;
+
 
             if let Some(session) = session {
                 match session.idle() {
@@ -92,11 +106,11 @@ impl Imap {
                         if let Err(err) = handle.init().await {
                             return Err(Error::IdleProtocolFailed(err));
                         }
-                        info!(context, "Idle wait (Secure) - timeout set to {} * {:?}", max_loop, timeout); // cs
+                        info!(context, "Idle wait (Secure) - handle timeout set to {} * {:?} - max_timeout_duration: {}", MAX_LOOP, timeout_data, max_timeout_duration); // cs
                         let mut n = 0;
                         loop {
                             n += 1;
-                            let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
+                            let (idle_wait, interrupt) = handle.wait_with_timeout(timeout_data);
                             *self.interrupt.lock().await = Some(interrupt);
                             if self.skip_next_idle_wait.load(Ordering::SeqCst) {
                                 // interrupt_idle has happened before
@@ -111,7 +125,7 @@ impl Imap {
                                 }
                                 match idle_wait.await {
                                     Ok(IdleResponse::NewData(x)) => {
-                                        info!(context, "Idle wait - has NewData {:?}", x);
+                                        info!(context, "Idle wait - has NewData, {:?}", x);
                                         break;
                                     }
                                     // TODO: idle_wait does not distinguish manual interrupts
@@ -119,12 +133,25 @@ impl Imap {
                                     // directly and reconnect .
                                     Ok(IdleResponse::Timeout) => {
                                         let timeout_dur = timeout_start.elapsed().unwrap_or_default().as_secs();
-                                        if n > max_loop || timeout_dur > max_dur {
-                                            info!(context, "Idle wait - timeout end reached, n: {}, secs: {}", n, timeout_dur);
+                                        if n > MAX_LOOP || timeout_dur > max_timeout_duration {
+                                            info!(
+                                                context,
+                                                "Idle wait - timeout, n: {:2}, diff: {:3}, secs: {}, *** end *** reached",
+                                                n,
+                                                timeout_dur - timeout_last_dur,
+                                                timeout_dur
+                                            );
                                             break;
                                         } else {
-                                            info!(context, "Idle wait - timeout, n: {}, secs: {}", n, timeout_dur);
+                                            info!(
+                                                context,
+                                                "Idle wait - timeout, n: {:2}, diff: {:3}, secs: {} ",
+                                                n,
+                                                timeout_dur - timeout_last_dur,
+                                                timeout_dur
+                                            );
                                         }
+                                        timeout_last_dur = timeout_dur;
                                     }
                                     Ok(IdleResponse::ManualInterrupt) => {
                                         info!(context, "Idle wait - interrupted manually");
@@ -140,23 +167,25 @@ impl Imap {
                         // if we can't properly terminate the idle
                         // protocol let's break the connection.
                         let res =
-                            async_std::future::timeout(Duration::from_secs(15), handle.done())
+                            async_std::future::timeout(Duration::from_secs(10), handle.done())
                                 .await
                                 .map_err(|err| {
-                                    info!(context, "Idle wait - triggering reconnect");
+                                    info!(context, "Idle wait - timeout in terminating idle: triggering reconnect");
                                     self.trigger_reconnect();
                                     Error::IdleTimeout(err)
                                 })?;
 
                         match res {
                             Ok(session) => {
+                                *self.max_timeout_duration.write().await = MAX_IDLE_DUR_LONG;
                                 *self.session.lock().await = Some(Session::Secure(session));
                             }
                             Err(err) => {
                                 // if we cannot terminate IDLE it probably
                                 // means that we waited long (with idle_wait)
                                 // but the network went away/changed
-                                info!(context, "Idle wait - triggering reconnect");
+                                info!(context, "Idle wait - IdleProtocolFailed: triggering reconnect, err: {:?}", err);
+                                *self.max_timeout_duration.write().await = MAX_IDLE_DUR_SHORT;
                                 self.trigger_reconnect();
                                 return Err(Error::IdleProtocolFailed(err));
                             }
@@ -167,8 +196,8 @@ impl Imap {
                             return Err(Error::IdleProtocolFailed(err));
                         }
 
-                        info!(context, "Idle wait (Inecure) - timeout set to {:?} s", timeout); // cs
-                        let (idle_wait, interrupt) = handle.wait_with_timeout(timeout);
+                        info!(context, "Idle wait (Inecure) - timeout set to {:?} s", timeout_data); // cs
+                        let (idle_wait, interrupt) = handle.wait_with_timeout(timeout_data);
                         *self.interrupt.lock().await = Some(interrupt);
 
                         if self.skip_next_idle_wait.load(Ordering::SeqCst) {

@@ -668,29 +668,41 @@ pub fn perform_sentbox_idle(context: &Context) {
         .idle(context, use_network);
 }
 
+
 pub fn interrupt_inbox_idle(context: &Context) {
-    info!(context, "interrupt_inbox_idle: called -> from FetchWorker.doWork()");
-    // we do not block on trying to obtain the thread lock
-    // because we don't know in which state the thread is.
-    // If it's currently fetching then we can not get the lock
-    // but we flag it for checking jobs so that idle will be skipped.
-    
+
+    // cs FetchWorker is called too often. it seems not to be possible to start > 15 min interval!
+    const MIN_WAIT_TIME_AS_SEC: i64 = 7200;
+    let now = time();
+    let mut lfc = *context.last_fetchworker_call.read().unwrap();
+    if lfc == 0 {
+        lfc = now;
+    } 
+    if lfc + MIN_WAIT_TIME_AS_SEC > now {
+        // cs:
+        // Fetchworker.doWork() is triggerd all 15 min. This is too often and prevents
+        // imap idle to work properly.
+        // skip this function when time is not elapsed.
+        //info!(context, "interrupt_inbox_idle: stop here as time isnt there, elapsed: {}", (now - lfc));
+        return;
+    }
+    info!(
+        context,
+        "interrupt_inbox_idle: called -> from -------- FetchWorker.doWork() --------, elapsed time: {}",
+        (now - lfc)
+    );
+
     if *context.network_online.read().unwrap() == false {
         info!(context, "interrupt_inbox_idle: stop execution, being offline!");
         return;
     }
     
-    // cs FetchWorker is called too often. it seems not to be possible to start > 15 min interval!
-    let now = time();
-    
+    // we do not block on trying to obtain the thread lock
+    // because we don't know in which state the thread is.
+    // If it's currently fetching then we can not get the lock
+    // but we flag it for checking jobs so that idle will be skipped.
     match context.inbox_thread.try_read() {
         Ok(inbox_thread) => {
-            //cs: check timing only when inbox is not fetching now, this is here
-            let lfc = *context.last_fetchworker_call.read().unwrap();
-            if lfc + 3600 > now {
-                info!(context, "interrupt_inbox_idle: stop here as time isnt there, elapsed: {}", (now - lfc));
-                return;
-            }
             *context.last_fetchworker_call.write().unwrap() = now;
             info!(context, "interrupt_inbox_idle: calling inbox_thread.interrupt_idle(), elapsed: {}", (now - lfc));
             inbox_thread.interrupt_idle(context);

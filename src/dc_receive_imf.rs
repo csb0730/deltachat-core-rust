@@ -41,7 +41,7 @@ pub fn dc_receive_imf(
 ) -> Result<()> {
     info!(
         context,
-        "Receiving message {}/{}...",
+        " => Receiving message {}/{}...",
         if !server_folder.as_ref().is_empty() {
             server_folder.as_ref()
         } else {

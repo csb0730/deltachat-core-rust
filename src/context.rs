@@ -167,9 +167,10 @@ impl Context {
                 info!(self, "--- network_online --- set to => false");
             };
             *self.network_online.write().unwrap() = new_status;
-        } else {
-            info!(self, "=== network_online === is => {}", new_status);
-        };
+        }
+        //} else {
+        //    info!(self, "=== network_online === is => {}", new_status);
+        //};
     }
 
     /// Returns database file path.

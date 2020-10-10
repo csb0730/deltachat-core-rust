@@ -145,6 +145,7 @@ pub struct Imap {
     interrupt: Mutex<Option<stop_token::StopSource>>,
     skip_next_idle_wait: AtomicBool,
     should_reconnect: AtomicBool,
+    max_timeout_duration: RwLock<u64>,
 }
 
 #[derive(Debug)]
@@ -315,6 +316,7 @@ impl Imap {
         match login_res {
             Ok(session) => {
                 *self.session.lock().await = Some(session);
+                info!(context, "IMAP setup_handle_if_needed: (Login done: Ok)");
                 Ok(())
             }
             Err((err, _)) => {
@@ -332,10 +334,6 @@ impl Imap {
     }
 
     async fn unsetup_handle(&self, context: &Context) {
-        //~info!(
-            //~context,
-            //~"IMAP unsetup_handle step 2 (acquiring session.lock)"
-        //~);
         if let Some(mut session) = self.session.lock().await.take() {
             if let Err(err) = session.close().await {
                 warn!(context, "failed to close connection: {:?}", err);
@@ -343,10 +341,9 @@ impl Imap {
         }
         *self.connected.lock().await = false;
 
-        //info!(context, "IMAP unsetup_handle step 3 (clearing config).");
         self.config.write().await.selected_folder = None;
         self.config.write().await.selected_mailbox = None;
-        info!(context, "IMAP unsetup_handle (disconnected)");
+        info!(context, "IMAP unsetup_handle: (disconnected)");
     }
 
     async fn free_connect_params(&self) {
@@ -387,7 +384,8 @@ impl Imap {
         if lp.mail_server.is_empty() || lp.mail_user.is_empty() || lp.mail_pw.is_empty() {
             return false;
         }
-
+        // cs
+        info!(context, "IMAP connecting ...");
         {
             let addr = &lp.addr;
             let imap_server = &lp.mail_server;
@@ -473,8 +471,6 @@ impl Imap {
         }
         
         self.setup_handle_if_needed(context).await?;
-        
-        //info!(context, "Imap::fetch");
         
         while self.fetch_new_messages(context, &watch_folder).await? {
             // We fetch until no more new messages are there.
@@ -615,8 +611,6 @@ impl Imap {
         };
 
         // cs fetch successful => network ok
-        //info!(context, "setting +++ network_online +++  =>  true");
-        //*context.network_online.write().unwrap() = true;
         context.set_network_online_status(true);
 
         // prefetch info from all unfetched mails
