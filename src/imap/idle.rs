@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime};
 
 use crate::context::Context;
+use crate::dc_tools::time;
 
 use super::select_folder;
 use super::session::Session;
@@ -18,7 +19,7 @@ type Result<T> = std::result::Result<T, Error>;
 // for idle timeout handling
 const     MAX_LOOP: i32             = 240;     // 20 min = 1200 s / 5s = 240
 const     MAX_IDLE_DUR_LONG: u64    = 21 * 60; // limit max duration to 23 min, loop counter not reliable
-const     MAX_IDLE_DUR_SHORT: u64   = 11 * 60;
+const     MAX_IDLE_DUR_SHORT: u64   = 11 * 60; // start value
 
 
 #[derive(Debug, Fail)]
@@ -70,10 +71,27 @@ impl Imap {
     
     pub async fn init_idle_timeout(&self) {
         if *self.max_timeout_duration.read().await == 0 {
-            *self.max_timeout_duration.write().await = MAX_IDLE_DUR_LONG;
+            *self.max_timeout_duration.write().await = MAX_IDLE_DUR_SHORT;
+            // long duration is done later by tryout
         }
     }
     
+    pub async fn set_idle_timeout(&self, duration: u64) {
+        *self.max_timeout_duration.write().await = duration;
+    }
+
+    pub async fn adapt_idle_timeout(&self, to_change_as_sec: i64) {
+        // inc or dec timeout value
+        let mut dur = *self.max_timeout_duration.read().await;
+        dur = (dur as i64 + to_change_as_sec) as u64;
+        if dur < MAX_IDLE_DUR_SHORT {
+            dur = MAX_IDLE_DUR_SHORT;
+        } else if dur > MAX_IDLE_DUR_LONG {
+            dur = MAX_IDLE_DUR_LONG;
+        }
+        *self.max_timeout_duration.write().await = dur;
+    }
+
     pub fn can_idle(&self) -> bool {
         task::block_on(async move { self.config.read().await.can_idle })
     }
@@ -92,11 +110,16 @@ impl Imap {
             self.init_idle_timeout().await;
 
             let session             = self.session.lock().await.take();
-            let timeout_data         = Duration::from_secs(5); // cs: 23 * 60 => 7 * 60 for testing => 5
+            // cs: this is now for data timeout only, not idle timeout
+            let timeout_data         = Duration::from_secs(5); 
             let timeout_start        = SystemTime::now();
             let max_timeout_duration = *self.max_timeout_duration.read().await;
             let mut timeout_last_dur = 0;
-
+            let mut max_timeout_reached = false;
+            
+            // set next wakeup timing for FetchWorker
+            let next_idle_end_timing = time() + max_timeout_duration as i64;
+            *context.next_imap_idle_interrupt.write().unwrap() = next_idle_end_timing;
 
             if let Some(session) = session {
                 match session.idle() {
@@ -106,7 +129,7 @@ impl Imap {
                         if let Err(err) = handle.init().await {
                             return Err(Error::IdleProtocolFailed(err));
                         }
-                        info!(context, "Idle wait (Secure) - handle timeout set to {} * {:?} - max_timeout_duration: {}", MAX_LOOP, timeout_data, max_timeout_duration); // cs
+                        info!(context, "Idle wait - (Secure) - 'handle' timeout"); // cs
                         let mut n = 0;
                         loop {
                             n += 1;
@@ -121,7 +144,13 @@ impl Imap {
                                 break;
                             } else {
                                 if n == 1 {
-                                    info!(context, "Idle wait - entering wait-on-remote state");
+                                    info!(
+                                        context,
+                                        "Idle wait - entering wait-on-remote state, max_timeout_duration: {}, n limit: {} * {:?}",
+                                        max_timeout_duration,
+                                        MAX_LOOP,
+                                        timeout_data
+                                    ); // cs
                                 }
                                 match idle_wait.await {
                                     Ok(IdleResponse::NewData(x)) => {
@@ -141,15 +170,19 @@ impl Imap {
                                                 timeout_dur - timeout_last_dur,
                                                 timeout_dur
                                             );
+                                            max_timeout_reached = true;
                                             break;
                                         } else {
-                                            info!(
-                                                context,
-                                                "Idle wait - timeout, n: {:2}, diff: {:3}, secs: {} ",
-                                                n,
-                                                timeout_dur - timeout_last_dur,
-                                                timeout_dur
-                                            );
+                                            let diff = timeout_dur - timeout_last_dur;
+                                            if diff > 60 {
+                                                info!(
+                                                    context,
+                                                    "Idle wait - timeout, n: {:2}, diff: {:3}, secs: {} ",
+                                                    n,
+                                                    diff,
+                                                    timeout_dur
+                                                );
+                                            }
                                         }
                                         timeout_last_dur = timeout_dur;
                                     }
@@ -167,7 +200,7 @@ impl Imap {
                         // if we can't properly terminate the idle
                         // protocol let's break the connection.
                         let res =
-                            async_std::future::timeout(Duration::from_secs(10), handle.done())
+                            async_std::future::timeout(Duration::from_secs(15), handle.done())
                                 .await
                                 .map_err(|err| {
                                     info!(context, "Idle wait - timeout in terminating idle: triggering reconnect");
@@ -177,7 +210,13 @@ impl Imap {
 
                         match res {
                             Ok(session) => {
-                                *self.max_timeout_duration.write().await = MAX_IDLE_DUR_LONG;
+                                if max_timeout_reached {
+                                    info!(context, "Idle wait - All ok, timeout reached => skipping any next jobs and fetch");
+                                    *context.go_on_with_idle.write().unwrap() = true;
+                                    self.adapt_idle_timeout(60).await;
+                                    let dur = *self.max_timeout_duration.read().await;
+                                    info!(context, "Idle wait (+) new max_timeout_duration: {}", dur);
+                                }
                                 *self.session.lock().await = Some(Session::Secure(session));
                             }
                             Err(err) => {
@@ -185,7 +224,11 @@ impl Imap {
                                 // means that we waited long (with idle_wait)
                                 // but the network went away/changed
                                 info!(context, "Idle wait - IdleProtocolFailed: triggering reconnect, err: {:?}", err);
-                                *self.max_timeout_duration.write().await = MAX_IDLE_DUR_SHORT;
+
+                                self.adapt_idle_timeout(-180).await;
+                                let dur = *self.max_timeout_duration.read().await;
+                                info!(context, "Idle wait (-) new max_timeout_duration: {}", dur);
+                                
                                 self.trigger_reconnect();
                                 return Err(Error::IdleProtocolFailed(err));
                             }
@@ -196,7 +239,7 @@ impl Imap {
                             return Err(Error::IdleProtocolFailed(err));
                         }
 
-                        info!(context, "Idle wait (Inecure) - timeout set to {:?} s", timeout_data); // cs
+                        info!(context, "Idle wait - (Inecure) - timeout set to {:?} s", timeout_data); // cs
                         let (idle_wait, interrupt) = handle.wait_with_timeout(timeout_data);
                         *self.interrupt.lock().await = Some(interrupt);
 

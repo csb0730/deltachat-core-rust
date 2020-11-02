@@ -32,10 +32,16 @@ use crate::param::*;
 use crate::sql;
 
 // results in ~3 weeks for the last backoff timespan (cs: original algorithm)
-const JOB_RETRIES: u32 = 17;
+const JOB_RETRIES: u32 = 11;
 
 // cs
-const MIN_SECONDS_BLOCK_MAYBE_NETWORK: i64 = 30;
+const MIN_SECONDS_BLOCK_MAYBE_NETWORK: i64 = 10;
+
+// cs: for maybe_network, defer fetchworker call
+const MIN_WAIT_TIME_FETCH_WORKER_AS_SEC: i64 = 7200;
+
+// cs: todo: delete me
+//const MAX_IDLE_DUR_LONG: u64  = 21 * 60; // limit max duration to 23 min, loop counter not reliable
 
 /// Thread IDs
 #[derive(Debug, Display, Copy, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive, FromSql, ToSql)]
@@ -593,7 +599,9 @@ pub fn job_kill_ids(context: &Context, job_ids: &[u32]) -> sql::Result<()> {
 
 pub fn perform_inbox_fetch(context: &Context) {
     let use_network = context.get_config_bool(Config::InboxWatch);
-
+    if *context.go_on_with_idle.read().unwrap() {
+        return;
+    }
     task::block_on(
         context
             .inbox_thread
@@ -601,6 +609,7 @@ pub fn perform_inbox_fetch(context: &Context) {
             .unwrap()
             .fetch(context, use_network),
     );
+
 }
 
 pub fn perform_mvbox_fetch(context: &Context) {
@@ -631,6 +640,7 @@ pub fn perform_inbox_idle(context: &Context) {
 
     let jobs_needed    = *context.perform_inbox_jobs_needed.clone().read().unwrap();
     let network_online = *context.network_online.read().unwrap();
+    *context.go_on_with_idle.write().unwrap() = false;
 
     if jobs_needed && network_online {
         info!(
@@ -671,27 +681,36 @@ pub fn perform_sentbox_idle(context: &Context) {
 
 pub fn interrupt_inbox_idle(context: &Context) {
 
-    // cs FetchWorker is called too often. it seems not to be possible to start > 15 min interval!
-    const MIN_WAIT_TIME_AS_SEC: i64 = 7200;
+    // cs: FetchWorker is called every 15 min. Another interval is not possible (bug)!
     let now = time();
-    let mut lfc = *context.last_fetchworker_call.read().unwrap();
-    if lfc == 0 {
-        lfc = now;
-    } 
-    if lfc + MIN_WAIT_TIME_AS_SEC > now {
+    //let lfc = *context.last_fetchworker_call.read().unwrap();
+    // init of last_fetchworker_call (write!) is done by first run
+    
+    let niii = *context.next_imap_idle_interrupt.read().unwrap();
+                // set in idle.rs
+
+    if now > niii {
+        info!(context, "interrupt_inbox_idle: next_imap_idle_interrupt exceeded by: {}s --- FetchWorker.doWork() ---", (niii - now));
+    } else {
+        info!(context, "interrupt_inbox_idle: next_imap_idle_interrupt in: {}s --- FetchWorker.doWork() ---", (niii - now));
+        return;
+    }
+    /* // cs don't do this any more, new logic above 
+    if lfc + MIN_WAIT_TIME_FETCH_WORKER_AS_SEC > now {
         // cs:
         // Fetchworker.doWork() is triggerd all 15 min. This is too often and prevents
         // imap idle to work properly.
         // skip this function when time is not elapsed.
-        //info!(context, "interrupt_inbox_idle: stop here as time isnt there, elapsed: {}", (now - lfc));
+        info!(context, "interrupt_inbox_idle: stop execution, time isnt elapsed: {} --- FetchWorker.doWork() ----", (now - lfc));
         return;
     }
+
     info!(
         context,
-        "interrupt_inbox_idle: called -> from -------- FetchWorker.doWork() --------, elapsed time: {}",
-        (now - lfc)
+        "interrupt_inbox_idle: called -> from ------ FetchWorker.doWork() ------, time to next idle wakeup: {}s",
+        (niii - now)
     );
-
+    */
     if *context.network_online.read().unwrap() == false {
         info!(context, "interrupt_inbox_idle: stop execution, being offline!");
         return;
@@ -703,8 +722,16 @@ pub fn interrupt_inbox_idle(context: &Context) {
     // but we flag it for checking jobs so that idle will be skipped.
     match context.inbox_thread.try_read() {
         Ok(inbox_thread) => {
+            // This method is called by Periodic "FetchWorker.doWork()"
+            //  In the moment 7200s.
+            //  Because it is not possible to determine what idle timeout is the best
+            //  this is just a try to go to long duration!!!
+            // cs: todo: delete the following line
+            //task::block_on(inbox_thread.imap.set_idle_timeout(MAX_IDLE_DUR_LONG));
+            
             *context.last_fetchworker_call.write().unwrap() = now;
-            info!(context, "interrupt_inbox_idle: calling inbox_thread.interrupt_idle(), elapsed: {}", (now - lfc));
+            //info!(context, "interrupt_inbox_idle: calling inbox_thread.interrupt_idle(), elapsed: {}", (now - lfc));
+            info!(context, "interrupt_inbox_idle: calling inbox_thread.interrupt_idle(), idle timing passed by: {}s", (now - niii));
             inbox_thread.interrupt_idle(context);
         }
         Err(err) => {
@@ -715,7 +742,7 @@ pub fn interrupt_inbox_idle(context: &Context) {
 }
 
 pub fn interrupt_inbox_idle_2(context: &Context) {
-    info!(context, "interrupt_inbox_idle_2 (without time check): called");
+    info!(context, "interrupt_inbox_idle_2: (without time check): called");
     // we do not block on trying to obtain the thread lock
     // because we don't know in which state the thread is.
     // If it's currently fetching then we can not get the lock
@@ -811,7 +838,7 @@ pub fn perform_smtp_idle(context: &Context) {
                         //cs if we are offline, set default timeout
                         // when waked up earier, state.idle is signaled
                         info!(context, "SMTP-idle - being offline! - setting default timeout: 20min");
-                        dur = time::Duration::new(20 * 60, 0); // 10 -> 20 min
+                        dur = time::Duration::new(10 * 60, 0);
                     }
 
                     let res = cvar.wait_timeout(state, dur).unwrap();
@@ -847,14 +874,14 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
         )
         .unwrap_or_default();
 
-    let mut wakeup_time = time::Duration::new(20 * 60, 0); // 10 -> 20 min
+    let mut wakeup_time = time::Duration::new(10 * 60, 0);
     let now = time();
     if t > 0 {
         info!(context, "get_next_wakeup_time: desired_time in: {}s", t-now);
         if t > now {
             wakeup_time = time::Duration::new((t-now) as u64, 0);
         } else if *context.network_online.read().unwrap() == true {
-            wakeup_time = time::Duration::new(3, 0);
+            wakeup_time = time::Duration::new(1, 0);
         }
     }
 
@@ -864,26 +891,24 @@ fn get_next_wakeup_time(context: &Context, thread: Thread) -> time::Duration {
 
 pub fn maybe_network(context: &Context, status: u32) {
 
+    let now = time();
+    
+    if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
+        // cs: prevent double and too quick invocation
+        info!(context, "maybe_network: call faster than {}s => no action!", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
+        return;
+    }
+
     if status == 0 {
-        //*context.network_online.write().unwrap() = false;
         info!(context, "maybe_network: call - offline - stopping here");
         context.set_network_online_status(false);
         return;
     }
     else {
-        //*context.network_online.write().unwrap() = true;
         info!(context, "maybe_network: call - online - go ...");
         context.set_network_online_status(true);
     }
     
-    
-    let now = time();
-    
-    if (now - *context.last_maybe_network_call.read().unwrap()) < MIN_SECONDS_BLOCK_MAYBE_NETWORK {
-        // cs: prevent double and too quick invocation
-        info!(context, "maybe_network: faster than {}s - stopping here", MIN_SECONDS_BLOCK_MAYBE_NETWORK);
-        return;
-    }
     *context.last_maybe_network_call.write().unwrap() = now;
     
     info!(context, "maybe_network: working ... interrupting all idles");
@@ -1070,11 +1095,14 @@ fn add_imap_deletion_jobs(context: &Context) -> sql::Result<()> {
 }
 
 pub fn perform_inbox_jobs(context: &Context) {
+    if *context.go_on_with_idle.read().unwrap() {
+        return;
+    }
     if *context.network_online.read().unwrap() == false {
         info!(context, "perform_inbox_jobs: stop execution, being offline!",);
         return;
     };
-    info!(context, "perform_inbox_jobs: go ...",);
+    //info!(context, "perform_inbox_jobs: go ...",);
 
     let probe_imap_network = *context.probe_imap_network.clone().read().unwrap();
     *context.probe_imap_network.write().unwrap() = false;
@@ -1105,11 +1133,11 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
         
         let mut job = match load_next_job(context, thread, probe_network){
             Some(job) => {
-                info!(context, "{} job_perform: job {} loaded and started - tries {} - action {}", thread, job, job.tries, job.action);
+                info!(context, "  {} job {}, job_perform: loaded and started - tries {} - action {}", thread, job, job.tries, job.action);
                 job    
             },
             _ => {
-                info!(context, "{} job_perform: no job found => no action", thread);
+                info!(context, "{} ** no job ** found, job_perform: => no action!", thread);
                 break;
             }
             
@@ -1254,14 +1282,12 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                 if let Err(err) = res {
                     warn!(
                         context,
-                        "{} remove job {} as it failed with error {:?}", thread, job, err
+                        "{} job {}, removed as it failed with error {:?}", thread, job, err
                     );
-                    //cs todo don't delete job here
-                    //09-03 17:42:14.002 32352 32379 W DeltaChat: ThreadId(9) src/job.rs:1212: Smtp remove job ##244, action SendMsgToSmtp as it failed with error Message("Permanent SMTP error: Requested action not taken: mailbox unavailable")
                 } else {
-                    info!(context, "{} remove job {} as it succeeded", thread, job);
+                    info!(context, "{} job {}, removed as it succeeded", thread, job);
                     
-                    info!(context, "{} job {}, setting last_job_success => true", thread, job);
+                    //info!(context, "{} job {}, setting last_job_success => true", thread, job);
                     // network state is online when job succeeds
                     *context.last_job_success.write().unwrap() = true;
                 }
@@ -1273,14 +1299,15 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
 }
 
 fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, tries: u32) -> Status {
+    /*
     info!(
         context,
-        "{} perform_job_action: begin immediate try {} of job {}",
+        "{} job {}, perform_job_action: begin immediate try {}",
         thread,
+        job,
         tries,
-        job
     );
-
+    */
     let try_res = match job.action {
         Action::Unknown => Status::Finished(Err(format_err!("Unknown job id found"))),
         Action::SendMsgToSmtp => job.SendMsgToSmtp(context),
@@ -1308,7 +1335,7 @@ fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, trie
 
     info!(
         context,
-        "{} finished immediate try {} of job {} - try_res {}", thread, tries, job, try_res
+        "{} job {}, finished immediate try {} - try_res {}", thread, job, tries, try_res
     );
 
     try_res
@@ -1316,13 +1343,6 @@ fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, trie
 
 
 fn get_backoff_time_offset(tries: u32) -> i64 {
-    //~let n = 2_i32.pow(tries - 1) * 60;
-    //~let mut rng = thread_rng();
-    //~let r: i32 = rng.gen();
-    //~let mut seconds = r % (n + 1);
-    //~if seconds < 3 {
-        //~seconds = 3;
-    //~}
     let seconds = match tries {
         0 | 1 => 2,
         2 | 3 => tries * 30,
@@ -1334,6 +1354,7 @@ fn get_backoff_time_offset(tries: u32) -> i64 {
     };
     seconds as i64
 }
+
 
 fn suspend_smtp_thread(context: &Context, suspend: bool) {
     context.smtp_state.0.lock().unwrap().suspended = suspend;
@@ -1425,7 +1446,6 @@ pub fn interrupt_smtp_idle(context: &Context) {
     state.perform_jobs_needed = PerformJobsNeeded::AtOnce;
     state.idle = true;
     cvar.notify_one();
-    //info!(context, "interrupt_smtp_idle: ended",);
 }
 
 /// Load jobs from the database.

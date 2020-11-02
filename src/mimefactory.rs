@@ -465,7 +465,8 @@ impl<'a, 'b> MimeFactory<'a, 'b> {
             encode_words(&subject_str)
         };
         
-        info!(self.context, "MimeFactory::render: subject: {}", subject);
+        //cs todo: delete me
+        //info!(self.context, "MimeFactory::render: subject: {}", subject);
         
         let mut message = match self.loaded {
             Loaded::Message { .. } => {

@@ -31,7 +31,7 @@ impl JobThread {
     }
 
     pub fn suspend(&self, context: &Context) {
-        info!(context, "Suspending {}-thread.", self.name,);
+        info!(context, "{}-thread, suspending", self.name,);
         {
             self.state.0.lock().unwrap().suspended = true;
         }
@@ -46,7 +46,7 @@ impl JobThread {
     }
 
     pub fn unsuspend(&self, context: &Context) {
-        info!(context, "Unsuspending {}-thread.", self.name);
+        info!(context, "{}-thread, unsuspending", self.name);
 
         let &(ref lock, ref cvar) = &*self.state.clone();
         let mut state = lock.lock().unwrap();
@@ -61,7 +61,7 @@ impl JobThread {
             self.state.0.lock().unwrap().jobs_needed = true;
         }
 
-        info!(context, "JobThread::interrupt_idle, Interrupting {}-IDLE...", self.name);
+        info!(context, "{}-thread - JobThread::interrupt_idle ...", self.name);
         self.imap.interrupt_idle(context);
 
         let &(ref lock, ref cvar) = &*self.state.clone();
@@ -69,11 +69,10 @@ impl JobThread {
 
         state.idle = true;
         cvar.notify_one();
-        //info!(context, "Interrupting {}-IDLE... finished", self.name);
     }
 
     pub async fn fetch(&mut self, context: &Context, use_network: bool) {
-        info!(context, "JobThread::fetch {}-thread", self.name);
+        info!(context, "{}-thread - JobThread::fetch, use_network: {}", self.name, use_network);
         {
             let &(ref lock, _) = &*self.state.clone();
             let mut state = lock.lock().unwrap();
@@ -87,10 +86,10 @@ impl JobThread {
 
         if use_network {
             if let Err(err) = self.connect_and_fetch(context).await {
-                warn!(context, "connect+fetch failed: {:?}, reconnect & retry {}-thread", err, self.name);
+                warn!(context, "{}-thread - connect+fetch failed: {:?}, reconnect & retry", self.name, err);
                 self.imap.trigger_reconnect();
                 if let Err(err) = self.connect_and_fetch(context).await {
-                    warn!(context, "connect+fetch failed (2nd try): {:?}, {}-thread", err, self.name);
+                    warn!(context, "{}-thread - connect+fetch failed (2nd try): {:?}", self.name, err);
                     context.set_network_online_status(false);
                 }
             }
@@ -99,7 +98,7 @@ impl JobThread {
     }
 
     async fn connect_and_fetch(&mut self, context: &Context) -> Result<()> {
-        let prefix = format!("{}-fetch", self.name);
+        let prefix = format!("{}-thread connect_and_fetch", self.name);
         match self.imap.connect_configured(context) {
             Ok(()) => {
                 context.set_network_online_status(true);
@@ -148,7 +147,7 @@ impl JobThread {
             if state.jobs_needed {
                 info!(
                     context,
-                    "{}-IDLE will not be started as jobs are needed (it was interrupted while not idling)",
+                    "{}-thread - IDLE will not be started as jobs are needed",
                     self.name,
                 );
                 state.jobs_needed = false;
@@ -176,7 +175,7 @@ impl JobThread {
             }
         }
 
-        let prefix = format!("{}-IDLE", self.name);
+        let prefix = format!("{}-thread IDLE", self.name);
         let do_fake_idle = match self.imap.connect_configured(context) {
             Ok(()) => {
                 if !self.imap.can_idle() {
@@ -195,7 +194,7 @@ impl JobThread {
                 }
             }
             Err(err) => {
-                info!(context, "{}-IDLE connection fail: {:?}", self.name, err);
+                info!(context, "{}-thread IDLE connection fail: {:?}", self.name, err);
                 // if the connection fails, use fake_idle to retry periodically
                 // fake_idle() will be woken up by interrupt_idle() as
                 // well so will act on maybe_network events

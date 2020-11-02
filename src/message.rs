@@ -333,7 +333,8 @@ impl Message {
                                 ),
                                 id
                             );
-                            text = String::from_utf8_lossy(buf).into_owned();
+                            // cs original: text = String::from_utf8_lossy(buf).into_owned(); 
+                            text = String::from_utf8_lossy(&buf.to_vec()).into_owned();
                         }
                     } else {
                         text = "".to_string();

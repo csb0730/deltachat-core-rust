@@ -1,5 +1,14 @@
 # Changelog 
 
+## 1.27.9
+
+- More optimization IMAP idle timeout:
+    change interval on network events only
+    only log intervals > 60s
+
+- skipping inbox jobs and fetch when no error after idling
+
+
 ## 1.27.8
 
 - Split IMAP idle timeout to many small intervals
@@ -8,7 +17,6 @@
 - Experimental Broadcast groups
   (add #BCC to the name of group for using)
   Include changes from official pr.
-
 
 
 ## 1.27.7

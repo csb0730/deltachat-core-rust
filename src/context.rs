@@ -43,6 +43,8 @@ pub struct Context {
     pub last_job_success: Arc<RwLock<bool>>,
     pub last_maybe_network_call: RwLock<i64>,
     pub last_fetchworker_call: RwLock<i64>,
+    pub go_on_with_idle: Arc<RwLock<bool>>,
+    pub next_imap_idle_interrupt: RwLock<i64>,
     
     pub sql: Sql,
     pub perform_inbox_jobs_needed: Arc<RwLock<bool>>,
@@ -119,6 +121,8 @@ impl Context {
             last_job_success: Arc::new(RwLock::new(false)),
             last_maybe_network_call: RwLock::new(0),
             last_fetchworker_call: RwLock::new(0),
+            next_imap_idle_interrupt: RwLock::new(0),
+            go_on_with_idle: Arc::new(RwLock::new(false)),
             cb,
             os_name: Some(os_name),
             running_state: Arc::new(RwLock::new(Default::default())),
