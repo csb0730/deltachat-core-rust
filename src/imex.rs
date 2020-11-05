@@ -761,7 +761,7 @@ fn export_backup2(context: &Context, dir: impl AsRef<Path>) -> Result<()> {
             Err(err)
         }
         Ok(()) => {
-			let now2 = time();
+            let now2 = time();
             dest_sql.set_raw_config_int(context, "backup_time", now1 as i32)?;
             dest_sql.set_raw_config_int(context, "backup_duration", (now2-now1) as i32)?;
             context.call_cb(Event::ImexFileWritten(dest_path_filename));
@@ -773,6 +773,7 @@ fn export_backup2(context: &Context, dir: impl AsRef<Path>) -> Result<()> {
 
     Ok(res?)
 }
+
 
 #[allow(dead_code)]
 fn add_files_to_export(context: &Context, sql: &Sql) -> Result<()> {

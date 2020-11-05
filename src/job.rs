@@ -37,8 +37,8 @@ const JOB_RETRIES: u32 = 11;
 // cs
 const MIN_SECONDS_BLOCK_MAYBE_NETWORK: i64 = 10;
 
-// cs: for maybe_network, defer fetchworker call
-const MIN_WAIT_TIME_FETCH_WORKER_AS_SEC: i64 = 7200;
+// cs: for maybe_network, defer fetchworker call (todo: delete me)
+//const MIN_WAIT_TIME_FETCH_WORKER_AS_SEC: i64 = 7200;
 
 // cs: todo: delete me
 //const MAX_IDLE_DUR_LONG: u64  = 21 * 60; // limit max duration to 23 min, loop counter not reliable
@@ -1393,7 +1393,7 @@ fn add_smtp_job(
     param.set(Param::File, blob.as_name());
     param.set(Param::Recipients, &recipients);
 
-    job_add(context, action, msg_id.to_u32() as i32, param, 1);
+    job_add(context, action, msg_id.to_u32() as i32, param, 0);
 
     Ok(())
 }
