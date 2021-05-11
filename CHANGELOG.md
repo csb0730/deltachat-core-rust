@@ -1,5 +1,11 @@
 # Changelog 
 
+## 1.27.10
+
+- Fix send error for big video files (timeout)
+- Fix last_job_success setting for smtp (or even imap)
+
+
 ## 1.27.9
 
 - More optimization IMAP idle timeout:

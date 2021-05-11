@@ -14,7 +14,9 @@ use crate::login_param::{dc_build_tls, LoginParam};
 use crate::oauth2::*;
 
 /// SMTP write and read timeout in seconds.
-const SMTP_TIMEOUT: u64 = 30;
+/// 20210406cs: fix
+/// needs to be higher than 30s for sending videos !!!
+const SMTP_TIMEOUT: u64 = 180; //30;
 
 #[derive(Debug, Fail)]
 pub enum Error {

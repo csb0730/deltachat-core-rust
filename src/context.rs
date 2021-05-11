@@ -9,6 +9,7 @@ use crate::chat::*;
 use crate::config::Config;
 use crate::constants::*;
 use crate::contact::*;
+use crate::dc_tools::*; //cs
 use crate::error::*;
 use crate::events::Event;
 use crate::imap::*;
@@ -304,6 +305,8 @@ impl Context {
             .sql
             .get_raw_config(self, "configured_mvbox_folder")
             .unwrap_or_else(|| "<unset>".to_string());
+        //cs
+        let db_size_in_bytes = dc_get_filebytes(self, self.get_dbfile());
 
         let mut res = get_info();
         res.insert("number_of_chats", chats.to_string());
@@ -312,6 +315,7 @@ impl Context {
         res.insert("number_of_contacts", contacts.to_string());
         res.insert("database_dir", self.get_dbfile().display().to_string());
         res.insert("database_version", dbversion.to_string());
+        res.insert("database_size", format!("{}", db_size_in_bytes)); //cs
         res.insert("blobdir", self.get_blobdir().display().to_string());
         res.insert("display_name", displayname.unwrap_or_else(|| unset.into()));
         res.insert(

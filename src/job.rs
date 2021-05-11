@@ -1211,8 +1211,6 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     // Increase tries only if network is there (possibly) and two consecutive tries fail
                     // The delete jobs may fail if message is not at server. Here don't look if job fails 
                     // => Maybe this simple approach here is not really correct !!!
-                    *context.last_job_success.write().unwrap() = false;
-                    
                     info!(context, "{} job {}, increase tries", thread, job);
                     job.tries + 1
                 }
@@ -1225,6 +1223,11 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                         last_job_success);
                     job.tries
                 };
+                // 20210406cs: fix
+                // last_job_success is always false here into that condition
+                *context.last_job_success.write().unwrap() = false;
+
+
                     
                 if tries < JOB_RETRIES {
                     info!(
