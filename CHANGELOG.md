@@ -1,5 +1,11 @@
 # Changelog 
 
+## 1.27.11
+
+- upgrade async-smtp and async-imap to fix timeout issues 
+- set timeout value smtp to default (60s)
+
+
 ## 1.27.10
 
 - Fix send error for big video files (timeout)

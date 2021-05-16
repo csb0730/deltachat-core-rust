@@ -1,6 +1,6 @@
 [package]
 name = "deltachat"
-version = "1.27.10"
+version = "1.27.11"
 authors = ["Delta Chat Developers (ML) <delta@codespeak.net>"]
 edition = "2018"
 license = "MPL-2.0"
@@ -12,7 +12,7 @@ lto = true
 deltachat_derive = { path = "./deltachat_derive" }
 
 libc = "0.2.51"
-pgp = { version = "0.5.1", default-features = false } 
+pgp = { version = "0.7.0", default-features = false } 
 hex = "0.4.0"
 sha2 = "0.8.0"
 rand = "0.7.0"
@@ -23,7 +23,7 @@ num-traits = "0.2.6"
 async-smtp = "0.2"
 email = { git = "https://github.com/deltachat/rust-email", branch = "master" }
 lettre_email = { git = "https://github.com/deltachat/lettre", branch = "master" }
-async-imap = "0.2"
+async-imap = "0.5.0"
 async-native-tls = "0.3.1"
 async-std = { version = "1.4", features = ["unstable"] }
 base64 = "0.11"
@@ -52,7 +52,7 @@ escaper = "0.1.0"
 bitflags = "1.1.0"
 debug_stub_derive = "0.3.0"
 sanitize-filename = "0.2.1"
-stop-token = { version = "0.1.1", features = ["unstable"] }
+stop-token = "0.2.0"
 mailparse = "0.10.2"
 encoded-words = { git = "https://github.com/async-email/encoded-words", branch="master" }
 native-tls = "0.2.3"
@@ -84,7 +84,7 @@ required-features = ["rustyline"]
 
 
 [features]
-default = ["nightly"]
+default = []
 vendored = ["async-native-tls/vendored", "reqwest/native-tls-vendored", "async-smtp/native-tls-vendored"]
 nightly = ["pgp/nightly"]
 

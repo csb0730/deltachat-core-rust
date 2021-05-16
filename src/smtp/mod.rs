@@ -16,7 +16,8 @@ use crate::oauth2::*;
 /// SMTP write and read timeout in seconds.
 /// 20210406cs: fix
 /// needs to be higher than 30s for sending videos !!!
-const SMTP_TIMEOUT: u64 = 180; //30;
+/// fix #1797 solves the problem (upgrade async-smtp lib to )
+const SMTP_TIMEOUT: u64 = 60; //30;
 
 #[derive(Debug, Fail)]
 pub enum Error {

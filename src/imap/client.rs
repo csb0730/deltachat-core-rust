@@ -24,9 +24,10 @@ impl Client {
         let tls = dc_build_tls(certificate_checks);
         let tls_stream = tls.connect(domain.as_ref(), stream).await?;
         let mut client = ImapClient::new(tls_stream);
-        if std::env::var(crate::DCC_IMAP_DEBUG).is_ok() {
-            client.debug = true;
-        }
+        
+        //if std::env::var(crate::DCC_IMAP_DEBUG).is_ok() {
+            //client.debug = true;
+        //}
 
         let _greeting = client
             .read_response()
@@ -40,9 +41,9 @@ impl Client {
         let stream = TcpStream::connect(addr).await?;
 
         let mut client = ImapClient::new(stream);
-        if std::env::var(crate::DCC_IMAP_DEBUG).is_ok() {
-            client.debug = true;
-        }
+        //if std::env::var(crate::DCC_IMAP_DEBUG).is_ok() {
+            //client.debug = true;
+        //}
         let _greeting = client
             .read_response()
             .await
@@ -68,10 +69,12 @@ impl Client {
         }
     }
 
-    pub async fn authenticate<A: async_imap::Authenticator, S: AsRef<str>>(
+
+    //pub async fn authenticate<A: async_imap::Authenticator, S: AsRef<str>>(
+    pub async fn authenticate(
         self,
-        auth_type: S,
-        authenticator: &A,
+        auth_type: &str,
+        authenticator: impl async_imap::Authenticator,
     ) -> Result<Session, (ImapError, Client)> {
         match self {
             Client::Secure(i) => match i.authenticate(auth_type, authenticator).await {
@@ -84,6 +87,7 @@ impl Client {
             },
         }
     }
+
 
     pub async fn login<U: AsRef<str>, P: AsRef<str>>(
         self,
