@@ -51,6 +51,13 @@ impl Smtp {
         if let Some(ref mut transport) = self.transport {
             // The timeout is 1min + 3min per MB.
             let timeout = 60 + (180 * message_len / 1_000_000) as u64;
+            info!(
+                context,
+                "Smtp job #{}, sending message, len={} bytes, timeout={} s",
+                job_id,
+                message_len,
+                timeout
+                );
             transport.send_with_timeout(mail, Some(&Duration::from_secs(timeout))).await.map_err(Error::SendError)?;
 
             context.call_cb(Event::SmtpMessageSent(format!(

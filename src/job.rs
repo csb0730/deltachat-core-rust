@@ -1301,7 +1301,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
     }
 }
 
-fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, tries: u32) -> Status {
+fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, _tries: u32) -> Status {
     /*
     info!(
         context,
