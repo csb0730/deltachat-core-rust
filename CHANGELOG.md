@@ -2,8 +2,9 @@
 
 ## 1.27.11
 
-- upgrade async-smtp and async-imap to fix timeout issues 
-- set timeout value smtp to default (60s)
+- upgrade async-smtp and async-imap
+  and handle smtp send timeout based on message size.
+- set timeout value smtp to default of 60s
 
 
 ## 1.27.10

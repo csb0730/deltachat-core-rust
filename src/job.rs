@@ -1240,7 +1240,7 @@ fn job_perform(context: &Context, thread: Thread, probe_network: bool) {
                     job.update(context);
                     info!(
                         context,
-                        "{} job {}, not succeeded on try {}, retry in {} seconds.",
+                        "{} job #{}, not succeeded on try {}, retry in {} seconds.",
                         thread,
                         job.job_id as u32,
                         tries,
@@ -1338,7 +1338,7 @@ fn perform_job_action(context: &Context, mut job: &mut Job, thread: Thread, trie
 
     info!(
         context,
-        "{} job {}, finished immediate try {} - try_res {}", thread, job, tries, try_res
+        "{} job {}, finished immediate try {} - try_res {}", thread, job, job.tries, try_res
     );
 
     try_res

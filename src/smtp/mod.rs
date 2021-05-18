@@ -16,7 +16,9 @@ use crate::oauth2::*;
 /// SMTP write and read timeout in seconds.
 /// 20210406cs: fix
 /// needs to be higher than 30s for sending videos !!!
-/// fix #1797 solves the problem (upgrade async-smtp lib to )
+/// fix #1797 solves the problem (upgrade async-smtp lib 0.2 to 0.4.0;
+///  this provides send_with_timeout to handle send timeout seperately
+///  from other commands) see send.rs
 const SMTP_TIMEOUT: u64 = 60; //30;
 
 #[derive(Debug, Fail)]
